@@ -3,11 +3,21 @@ from torchvision.datasets import VOCDetection
 
 # define a class that is the subset of the VOC dataset, with the selected class
 class VOCSubset(VOCDetection):
-    def __init__(self, root, indices_file, selected_class, single_object = True, transform=None):
+    def __init__(self, root, indices_file, selected_class, single_object = True, transform=None, target_transform=None):
         # init the dataset
-        super().__init__(root=root, year="2012", image_set="trainval", download=False, transform=transform)
+        super().__init__(root=root,
+                        year="2012",
+                        image_set="trainval",
+                        download=False,
+                        transform=transform,
+                        target_transform=target_transform)
+        
         # load indices of the selected class from the saved file
-        self.selected_indices = torch.load(indices_file) 
+        try:
+            self.selected_indices = torch.load(indices_file) 
+        except FileNotFoundError: 
+            print(f'[Error] The file {indices_file} was not found.')
+        
         # store params
         self.selected_class = selected_class 
         self.single_object = single_object
@@ -18,8 +28,10 @@ class VOCSubset(VOCDetection):
     def __getitem__(self, idx):
         # get the real image index from the selected indices
         image_idx = self.selected_indices[idx]
+        
         # fetch the image using the saved index
         image, target = super().__getitem__(image_idx)  
+        
         # the target should only contain annotations for the selected class
         target = self.filter_annotations_for_class(target, self.selected_class)
         return image, target
@@ -33,6 +45,7 @@ class VOCSubset(VOCDetection):
         for obj in annotations:
             if obj['name'] == selected_class:
                 filtered_annotations.append(obj)
+            
                 # if single object - stop after the first match
                 if self.single_object is True:
                     break  
