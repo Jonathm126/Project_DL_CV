@@ -1,9 +1,0 @@
-https://pytorch.org/blog/how-to-train-state-of-the-art-models-using-torchvision-latest-primitives/
-https://pytorch.org/vision/main/models/generated/torchvision.models.mobilenet_v3_large.html#torchvision.models.mobilenet_v3_large
-https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html
-
-The inference transforms are available at MobileNet_V3_Large_Weights.IMAGENET1K_V2.transforms and perform the following preprocessing operations: 
-Accepts PIL.Image, 
-batched (B, C, H, W) and single (C, H, W) image torch.Tensor objects. 
-The images are resized to resize_size=[232] using interpolation=InterpolationMode.BILINEAR, followed by a central crop of crop_size=[224]. 
-Finally the values are first rescaled to [0.0, 1.0] and then normalized using mean=[0.485, 0.456, 0.406] and std=[0.229, 0.224, 0.225].
