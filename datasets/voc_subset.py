@@ -1,29 +1,32 @@
 # import torch
 from torchvision.datasets import VOCDetection
+
+# my imports
 from config import config
 import utils.voc_utils as voc_utils
 
 # define a class that is the subset of the VOC dataset, with the selected class
 class VOCSubset(VOCDetection):
-    def __init__(self, indices_list, selected_class, single_instance = True, transform = None, target_transform = None):
+    def __init__(self, indices_list, selected_class, single_instance = True, transform = None, transforms = None):
         ''' Inputs:
                 - indices_list: list of indices, some of which have the "selected class"
                 - selected_class: name of selected class in VOC dataset
                 - single_instance: bool, single object in frame (if no, multiple bboxes per frame returned)
-                - transform: the image transformation
-                - target_transform: the target (bbox) transformation
+                - transform: a transformation function for the image only
+                - transforms: a transformation function for BOTH the image and the target
         '''
         # init the dataset
         super().__init__(root=config.dataset_path,
                         year="2012",
                         image_set="trainval",
                         download=False,
-                        transform=transform,
-                        target_transform=target_transform)
+                        transform = transform,
+                        transforms = transforms)
         
-        # store indices
+        # store params
         assert(len(indices_list) >= 1)
         self.selected_indices = indices_list
+        self.single_instance = single_instance
         
         # store the selected label as a number after conversion
         if isinstance(selected_class, str):
@@ -32,8 +35,6 @@ class VOCSubset(VOCDetection):
         else:
             # assuming the alternative is an int or a tensor...
             self.selected_label = selected_class
-
-        self.single_instance = single_instance
 
     def __len__(self):
         return len(self.selected_indices)
@@ -44,7 +45,7 @@ class VOCSubset(VOCDetection):
         # fetch the image using the saved index
         image, target = super().__getitem__(image_idx)  
         # convert the object to torch notation
-        torch_target = voc_utils.parse_target_voc_torch(target)
+        torch_target = voc_utils.parse_target_voc_torch(image, target)
         # if the target should only contain a single object (instance) per frame
         if self.single_instance:
             torch_target = self.single_instance_and_filter(torch_target)

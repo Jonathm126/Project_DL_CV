@@ -1,6 +1,5 @@
 import torch
-import torchvision
-import torchvision.transforms.functional as F
+from torchvision import tv_tensors
 
 # define the voc class to numerical index dict
 voc_class_to_idx = {
@@ -33,48 +32,27 @@ def voc_idx_to_class(labels):
     
     return idx
 
-# helper for plotting
-def voc_img_bbox_plot(image, target):
-    '''Helper function to plot bounding boxes.
-        Input:
-        - image - torch float32
-        - target - in torch notation
-        - labels (optional): list of names'''
-    
-    # get the bounding box for the instance using voc_to_tensor
-    boxes = target['boxes']
-    # convert the labels to string from number
-    labels = voc_idx_to_class(target['labels'])
-    # convert iamge to uint8
-    image_uint8 = (image * 255).to(torch.uint8) 
-    # draw the bounding boxes on the image
-    image_with_boxes = torchvision.utils.draw_bounding_boxes(image_uint8, boxes, fill=False, colors="red", width=3, labels=labels)
-    image_with_boxes_PIL = F.to_pil_image(image_with_boxes)
-    
-    return image_with_boxes_PIL
-
-# helper functions for parsing voc to torch
-def voc_bbox_to_tensor(voc_bndbox):
-    '''Convert VOC-style bounding box notation to a PyTorch tensor.'''
-    xmin = int(voc_bndbox['xmin'])
-    ymin = int(voc_bndbox['ymin'])
-    xmax = int(voc_bndbox['xmax'])
-    ymax = int(voc_bndbox['ymax'])
-    
-    # return in torch notation order
-    return torch.tensor([xmin, ymin, xmax, ymax], dtype=torch.float32)
-
-def parse_target_voc_torch(target):
+def parse_target_voc_torch(image, target):
     '''Parse the VOC target from VOC notation to torch notation.'''
-    torchTarget, boxes, labels = {}, [], []
+    torch_target, boxes, labels = {}, [], []
     
     # loop for each detected object:
     for obj in target['annotation']['object']:
         # get bouding box
-        boxes.append(voc_bbox_to_tensor(obj['bndbox'])) # append the bounding box
-        labels.append(voc_class_to_idx[obj['name']])    # append the label (name)
+        xmin = int(obj['bndbox']['xmin'])
+        ymin = int(obj['bndbox']['ymin'])
+        xmax = int(obj['bndbox']['xmax'])
+        ymax = int(obj['bndbox']['ymax'])
         
-    torchTarget['boxes'] = torch.stack(boxes)  # shape: (N, 4)
-    torchTarget['labels'] = torch.tensor(labels, dtype=torch.int64)  # shape: (N,)
+        # append the bounding box
+        boxes.append(torch.tensor([xmin, ymin, xmax, ymax], dtype=torch.float32))
+        # append the label (name)
+        labels.append(voc_class_to_idx[obj['name']])    
     
-    return torchTarget
+    # convert to torchvision tensor of type boundingbox
+    boxes_tensor = torch.stack(boxes)
+    torch_target['boxes'] = tv_tensors.BoundingBoxes(boxes_tensor, format='XYXY', 
+                                                canvas_size=image.shape[-2:], dtype=torch.float32)
+    torch_target['labels'] = torch.tensor(labels, dtype=torch.int64)  # shape: (N,)
+    
+    return torch_target
