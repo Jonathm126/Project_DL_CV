@@ -52,7 +52,7 @@ def parse_target_voc_torch(image, target):
     # convert to torchvision tensor of type boundingbox
     boxes_tensor = torch.stack(boxes)
     torch_target['boxes'] = tv_tensors.BoundingBoxes(boxes_tensor, format='XYXY', 
-                                                canvas_size=image.shape[-2:], dtype=torch.float32)
+                                                canvas_size=image.size[::-1], dtype=torch.float32)
     torch_target['labels'] = torch.tensor(labels, dtype=torch.int64)  # shape: (N,)
     
     return torch_target
