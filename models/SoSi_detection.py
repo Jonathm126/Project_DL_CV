@@ -6,7 +6,7 @@ import torchvision
 # a custom class for the object detector module
 class SoSiDetectionModel(torch.nn.Module):
     '''Class for the single object, single instance (SoSi) detector utilizing MobileNet V3.'''
-    def __init__(self, shared_head_conv_depth = 64):
+    def __init__(self, freeze_backbone = True, shared_head_conv_depth = 64):
         '''Init the single object, single instance (SoSi) detector utilizing MobileNet V3.'''
         # initialize super
         super().__init__()
@@ -16,6 +16,11 @@ class SoSiDetectionModel(torch.nn.Module):
         
         # take only the features (without softmax layer)
         self.backbone = torchvision.models.mobilenet_v3_large(weights = pretrained_weights).features
+        
+        # freeze the backbone
+        if freeze_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
         
         # the output depth of MobilNet Large is fixed at 960
         self.backbone_out_channels = 960 
