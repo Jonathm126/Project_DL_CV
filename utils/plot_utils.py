@@ -50,7 +50,7 @@ def voc_img_bbox_plot(image, target):
     # get the bounding box for the instance using voc_to_tensor
     boxes = target['boxes']
     # convert the labels to string from number
-    labels = voc_idx_to_class(target['labels'])
+    labels = ["cat" if label.item() == 1 else "not cat" for label in target['labels']]
     # convert iamge to uint8
     image_uint8 = (image * 255).to(torch.uint8) 
     # draw the bounding boxes on the image

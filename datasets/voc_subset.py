@@ -55,6 +55,9 @@ class VOCSubset(VOCDetection):
         # call the transform after parsing the target
         image, torch_target = self.both_transform(image, torch_target)
         
+        # converts to binary labels, true if the label is the model selected label
+        torch_target['labels'] = (torch_target['labels'] == self.selected_label).float()
+        
         return image, torch_target
     
     def single_instance_and_filter(self, torch_target):

@@ -1,15 +1,13 @@
 # torch
 import torch
-import torch.nn as nn
-import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
 
 # visualizer
 from tqdm import tqdm
-from torch.utils.tensorboard import SummaryWriter
 
 
 class Trainer:
-    def __init__(self, device, optimizer, train_dataloader, val_dataloader, losses, max_epochs = 10, lr_scheduler = None):
+    def __init__(self, device, model, optimizer, train_dataloader, val_dataloader, losses, max_epochs, lr_scheduler = None, stopping_patience = None):
         ''' Trainer class.  
             Inputs:
             - device: torch.device
@@ -21,104 +19,119 @@ class Trainer:
         '''
         # init
         self.device = device
+        self.model = model
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
         self.max_epochs = max_epochs
         self.optimizer = optimizer
-        
-        # scheduler
-        if lr_scheduler is not None:
-            self.scheudler = lr_scheduler
-    
+        self.scheduler = lr_scheduler
+        self.stopping_patience = stopping_patience
+
         # define loss functions
         self.bbox_loss_fn = losses[0] # for the bounding box use the first loss type
         self.class_loss_fn = losses[1] # for the classifier use the second loss type
         
         # TensorBoard writer
         self.writer = SummaryWriter()
-        
-    def single_epoch(self, epoch_idx):
+
+    def train_epoch(self, epoch_idx):
         self.model.train()
-        epoch_box_loss, epoch_class_loss, trainCorrect = 0, 0, 0 
+        epoch_bbox_loss, epoch_class_loss, train_correct = 0, 0, 0,
         
         # loop over the data
         for batch_idx, (images, targets) in enumerate(tqdm(self.train_dataloader, desc=f"Epoch {epoch_idx+1}/{self.max_epochs}")):
             # organize data
             images = images.to(self.device) # (N, 3, H, W)
-            boxes = targets['boxes'].to(self.device)  # single tensor (N, 1, 4)
+            bboxes = targets['boxes'].to(self.device)  # single tensor (N, 1, 4)
             labels = targets['labels'].to(self.device)   # single tensor (N, 1)
             
             # forward pass
             pred_boxes, pred_labels= self.model(images)
-            boxes_loss = self.bbox_loss_fn(pred_boxes, boxes)
+            
+            # log stats
+            bbox_loss = self.bbox_loss_fn(pred_boxes, bboxes.squeeze(1))
             class_loss = self.class_loss_fn(pred_labels, labels)
             
             # the total loss
-            loss = boxes_loss + class_loss
+            loss = bbox_loss + class_loss
+            
+            # add to epoch loss
+            epoch_bbox_loss += bbox_loss.item()
+            epoch_class_loss += class_loss.item()
             
             # backward pass
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
             
-            # add to epoch loss
-            epoch_box_loss += boxes_loss.item()
-            epoch_class_loss += class_loss.item()
-            
-            # compute how many predictions were right
-            if pred_labels.shape[1] == 1:  # binary
-                pred_labels = (torch.sigmoid(pred_labels) > 0.5).float()  # Convert logits to binary (0 or 1)
-            else:  # Multi-class classification
-                predicted_class = pred_labels.argmax(1)  # Take the highest probability cla
             # count how many correct predictions were there
-            trainCorrect += (predicted_class == labels).float().sum().item()
+            predicted = self.compute_predictions(pred_labels)
+            train_correct += (predicted == labels).float().sum().item()
             
             # Log losses to TensorBoard
-            #TODO finish tensorboard
-            self.writer.add_scalar("Loss/BoundingBox", boxes_loss.item(), epoch_idx * len(self.train_dataloader) + batch_idx)
-            self.writer.add_scalar("Loss/Classification", class_loss.item(), epoch_idx * len(self.train_dataloader) + batch_idx)
+            step = epoch_idx * len(self.val_dataloader) + batch_idx
+            self.writer.add_scalars("Loss/Train", {"BoundingBox": bbox_loss.item() ,"Classification": class_loss.item(), "Total": loss.item()}, step)
+        
+        return epoch_bbox_loss, epoch_class_loss, train_correct
 
-    def validate_epoch(self, epoch):
+    def validate_epoch(self, epoch_idx):
         self.model.eval()
-        total_bbox_loss, total_class_loss = 0, 0
+        epoch_bbox_loss, epoch_class_loss, total_loss, val_correct = 0, 0, 0, 0
         
         with torch.no_grad():
-            #TODO finish
-            for images, targets in self.val_dataloader:
-                images = [img.to(device) for img in images]
-                bboxes = torch.stack([t["bbox"].to(device) for t in targets])
-                labels = torch.stack([t["label"].to(device) for t in targets])
+            for batch_idx, (images, targets) in enumerate(tqdm(self.val_dataloader)):
+                images = images.to(self.device) # (N, 3, H, W)
+                bboxes = targets['boxes'].to(self.device)  # single tensor (N, 1, 4)
+                labels = targets['labels'].to(self.device)   # single tensor (N, 1)
                 
-                images = torch.stack(images)
+                # predict
+                pred_bboxes, pred_labels = self.model(images)
                 
-                pred_bboxes, pred_class = self.model(images)
-                
+                # loss
                 bbox_loss = self.bbox_loss_fn(pred_bboxes, bboxes)
-                class_loss = self.class_loss_fn(pred_class, labels)
+                class_loss = self.class_loss_fn(pred_labels, labels)
+                loss = bbox_loss + class_loss
                 
-                total_bbox_loss += bbox_loss.item()
-                total_class_loss += class_loss.item()
+                epoch_bbox_loss += bbox_loss.item()
+                epoch_class_loss += class_loss.item()
+                total_loss += loss.item()
+                
+                # compute correct predictions
+                predicted = self.compute_predictions(pred_labels)
+                val_correct += (predicted == labels).float().sum().item()
+                
+                # log to tensorboard
+                step = epoch_idx * len(self.val_dataloader) + batch_idx
+                self.writer.add_scalars("Loss/Val", {"BoundingBox": bbox_loss ,"Classification": class_loss, "Total": total_loss}, step)
         
-        avg_bbox_loss = total_bbox_loss / len(self.val_dataloader)
-        avg_class_loss = total_class_loss / len(self.val_dataloader)
-        
-        print(f"Validation Loss: BBox {avg_bbox_loss:.4f}, Class {avg_class_loss:.4f}")
-        
-        # Log validation losses to TensorBoard
-        self.writer.add_scalar("Val_Loss/BoundingBox", avg_bbox_loss, epoch)
-        self.writer.add_scalar("Val_Loss/Classification", avg_class_loss, epoch)
-
+        return epoch_bbox_loss, epoch_class_loss, val_correct
 
     def train(self):
-        for epoch in range(self.epochs):
-            self.model.train()
-            total_bbox_loss, total_class_loss = 0, 0
-            
-            #TODO finish this, add also tensoroard, add lr scheudler, add auto stopping 
-            
-            print(f"Train Loss: BBox {total_bbox_loss/len(self.train_dataloader):.4f}, Class {total_class_loss/len(self.train_dataloader):.4f}")
-            
-            # Validation phase
-            self.validate(epoch)
-        
+        # start epochs run
+        for epoch_idx in range(self.max_epochs):
+            # train
+            self.train_epoch(epoch_idx)
+            # validate
+            val_loss = self.validate_epoch(epoch_idx)
+            # lr schedule
+            if self.scheduler:
+                self.scheduler.step()
+            # early stopping
+            best_loss, counter = float('inf'), 0
+            # check to see if we improved
+            if self.stopping_patience is not None:
+                if val_loss < best_loss:
+                    best_loss = val_loss
+                    counter = 0
+                else:
+                    counter += 1
+                    # check to see if it's time for early stopping
+                    if counter >= self.stopping_patience:
+                        print("Early stopping triggered. Training terminated.")
+                        break
+
         self.writer.close()
+    
+    def compute_predictions(self, pred_labels):
+        '''counts the number of correct predictions (lables)'''
+        return (torch.sigmoid(pred_labels) > 0.5).float() if pred_labels.shape[1] == 1 else pred_labels.argmax(1)
