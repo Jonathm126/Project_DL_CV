@@ -7,14 +7,13 @@ from tqdm import tqdm
 
 
 class Trainer:
-    def __init__(self, device, model, optimizer, train_dataloader, val_dataloader, losses, max_epochs, lr_scheduler = None, stopping_patience = None):
+    def __init__(self, device, model, optimizer, train_dataloader, val_dataloader, losses, lr_scheduler = None, stopping_patience = None):
         ''' Trainer class.  
             Inputs:
             - device: torch.device
             - optimizer updated with the model parameters
             - dataloaders 
             - loss function: list of two [box_loss, class_loss]
-            - max epochs (int)
             - lr_scheduler - optional - lr scheduler wrapping the optimizer.
         '''
         # init
@@ -22,10 +21,11 @@ class Trainer:
         self.model = model
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
-        self.max_epochs = max_epochs
         self.optimizer = optimizer
         self.scheduler = lr_scheduler
         self.stopping_patience = stopping_patience
+        # train step counter
+        self.step_idx = 0
 
         # define loss functions
         self.bbox_loss_fn = losses[0] # for the bounding box use the first loss type
@@ -33,13 +33,13 @@ class Trainer:
         
         # TensorBoard writer
         self.writer = SummaryWriter()
+        self.writer.add_graph(model, images)
 
     def train_epoch(self, epoch_idx):
         self.model.train()
-        epoch_bbox_loss, epoch_class_loss, train_correct = 0, 0, 0,
-        
+                
         # loop over the data
-        for batch_idx, (images, targets) in enumerate(tqdm(self.train_dataloader, desc=f"Epoch {epoch_idx+1}/{self.max_epochs}")):
+        for images, targets in tqdm(self.train_dataloader, desc=f"Training Epoch {epoch_idx+1}"):
             # organize data
             images = images.to(self.device) # (N, 3, H, W)
             bboxes = targets['boxes'].to(self.device)  # single tensor (N, 1, 4)
@@ -48,38 +48,36 @@ class Trainer:
             # forward pass
             pred_boxes, pred_labels= self.model(images)
             
-            # log stats
+            # compute loss
             bbox_loss = self.bbox_loss_fn(pred_boxes, bboxes.squeeze(1))
             class_loss = self.class_loss_fn(pred_labels, labels)
-            
-            # the total loss
             loss = bbox_loss + class_loss
             
-            # add to epoch loss
-            epoch_bbox_loss += bbox_loss.item()
-            epoch_class_loss += class_loss.item()
-            
-            # backward pass
+            # backward pass + update
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
             
             # count how many correct predictions were there
-            predicted = self.compute_predictions(pred_labels)
-            train_correct += (predicted == labels).float().sum().item()
+            acc = self.compute_predictions(pred_labels)
+            batch_acc = (acc == labels).float().sum().item()
+            
+            # average stats for batch length
+            batch_size = images.shape[0]
+            stats = (bbox_loss.item(), class_loss.item(), loss.item(), batch_acc)
+            batch_bbox_loss, batch_class_loss, batch_loss, batch_acc = (x / batch_size for x in stats)
             
             # Log losses to TensorBoard
-            step = epoch_idx * len(self.val_dataloader) + batch_idx
-            self.writer.add_scalars("Loss/Train", {"BoundingBox": bbox_loss.item() ,"Classification": class_loss.item(), "Total": loss.item()}, step)
-        
-        return epoch_bbox_loss, epoch_class_loss, train_correct
+            self.step_idx += 1
+            self.writer.add_scalars("Train/Loss", {"BoundingBox": batch_bbox_loss ,"Classification": batch_class_loss, "Total": batch_loss}, self.step_idx)
+            self.writer.add_scalar("Train/Acc", batch_acc, self.step_idx)
 
     def validate_epoch(self, epoch_idx):
         self.model.eval()
-        epoch_bbox_loss, epoch_class_loss, total_loss, val_correct = 0, 0, 0, 0
+        epoch_bbox_loss, epoch_class_loss, epoch_total_loss, epoch_acc = 0, 0, 0, 0
         
         with torch.no_grad():
-            for batch_idx, (images, targets) in enumerate(tqdm(self.val_dataloader)):
+            for images, targets in tqdm(self.val_dataloader,  desc=f"Validation Epoch {epoch_idx+1}"):
                 images = images.to(self.device) # (N, 3, H, W)
                 bboxes = targets['boxes'].to(self.device)  # single tensor (N, 1, 4)
                 labels = targets['labels'].to(self.device)   # single tensor (N, 1)
@@ -88,27 +86,32 @@ class Trainer:
                 pred_bboxes, pred_labels = self.model(images)
                 
                 # loss
-                bbox_loss = self.bbox_loss_fn(pred_bboxes, bboxes)
+                bbox_loss = self.bbox_loss_fn(pred_bboxes, bboxes.squeeze(1))
                 class_loss = self.class_loss_fn(pred_labels, labels)
                 loss = bbox_loss + class_loss
                 
                 epoch_bbox_loss += bbox_loss.item()
                 epoch_class_loss += class_loss.item()
-                total_loss += loss.item()
+                epoch_total_loss += loss.item()
                 
                 # compute correct predictions
                 predicted = self.compute_predictions(pred_labels)
-                val_correct += (predicted == labels).float().sum().item()
-                
-                # log to tensorboard
-                step = epoch_idx * len(self.val_dataloader) + batch_idx
-                self.writer.add_scalars("Loss/Val", {"BoundingBox": bbox_loss ,"Classification": class_loss, "Total": total_loss}, step)
+                epoch_acc += (predicted == labels).float().sum().item()
         
-        return epoch_bbox_loss, epoch_class_loss, val_correct
+        # average for epoch length
+        val_size = len(self.val_dataloader.dataset)
+        stats = (epoch_bbox_loss, epoch_class_loss, epoch_total_loss, epoch_acc)
+        epoch_bbox_loss, epoch_class_loss, epoch_total_loss, epoch_acc = (x / val_size for x in stats)
+        
+        # log
+        self.writer.add_scalars("Val/Loss", {"BoundingBox": epoch_bbox_loss ,"Classification": epoch_class_loss, "Total": epoch_total_loss}, self.step_idx)
+        self.writer.add_scalar("Val/Acc", epoch_acc, self.step_idx)
+        
+        return epoch_total_loss
 
-    def train(self):
+    def train(self, max_epochs):
         # start epochs run
-        for epoch_idx in range(self.max_epochs):
+        for epoch_idx in range(max_epochs):
             # train
             self.train_epoch(epoch_idx)
             # validate

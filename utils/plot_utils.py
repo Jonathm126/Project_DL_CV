@@ -6,8 +6,14 @@ import torch
 import torchvision 
 import torchvision.transforms.functional as F
 
-# my imports
-from utils.voc_utils import voc_idx_to_class
+# un-normalize a normalized image
+def unnormalize(image, mean, std):
+    """
+    Returns a transform that reverses normalization.
+    """
+    inv_mean = [-m/s for m, s in zip(mean, std)]
+    inv_std = [1/s for s in std]
+    return F.normalize(image, mean=inv_mean, std=inv_std)
 
 # function to visualize images from a dataset
 def plot_images_from_voc_dataset(dataset, num_images=8, title="Dataset Images"):
@@ -20,16 +26,16 @@ def plot_images_from_voc_dataset(dataset, num_images=8, title="Dataset Images"):
     """
     random_indices = random.sample(range(len(dataset)), num_images)
     
-    fig, axes = plt.subplots(num_images // 4, 4, figsize=(15, 8))
+    fig, axes = plt.subplots(num_images // 4, 4, figsize=(12, 4))
     axes = axes.flatten()
 
     for i, idx in enumerate(random_indices):
         # Get image and target
         image, torch_target = dataset[idx]
-
+        
         # Convert image and draw bounding boxes
         image_with_boxes_PIL = voc_img_bbox_plot(image, torch_target)
-
+        
         # Plot the image
         axes[i].imshow(image_with_boxes_PIL)
         axes[i].axis("off")
