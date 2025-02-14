@@ -33,7 +33,9 @@ class Trainer:
         
         # TensorBoard writer
         self.writer = SummaryWriter()
-        self.writer.add_graph(model, images)
+        # add the model graph to the writer
+        sim_image = torch.randint(low=0, high=256, size=(1, 3, 224, 224), dtype=torch.float32).to(device)
+        self.writer.add_graph(model, sim_image)
 
     def train_epoch(self, epoch_idx):
         self.model.train()

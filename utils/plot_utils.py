@@ -46,21 +46,25 @@ def plot_images_from_voc_dataset(dataset, num_images=8, title="Dataset Images"):
     plt.show()
     
 # helper for transforming voc bbox to PIL
-def voc_img_bbox_plot(image, target):
+def voc_img_bbox_plot(image, target1, target2 = None):
     '''Helper function to plot bounding boxes.
         Input:
         - image - torch float32
         - target - in torch notation
         - labels (optional): list of names
     '''
-    # get the bounding box for the instance using voc_to_tensor
-    boxes = target['boxes']
-    # convert the labels to string from number
-    labels = ["cat" if label.item() == 1 else "not cat" for label in target['labels']]
     # convert iamge to uint8
     image_uint8 = (image * 255).to(torch.uint8) 
-    # draw the bounding boxes on the image
-    image_with_boxes = torchvision.utils.draw_bounding_boxes(image_uint8, boxes, fill=False, colors="red", width=3, labels=labels)
-    image_with_boxes_PIL = F.to_pil_image(image_with_boxes)
     
-    return image_with_boxes_PIL
+    # Process target1 (Red boxes)
+    boxes1 = target1['boxes']
+    labels1 = ["cat" if label.item() == 1 else "not cat" for label in target1['labels']]
+    image_with_boxes = torchvision.utils.draw_bounding_boxes(image_uint8, boxes1, fill=False, colors="red", width=3, labels=labels1)
+    
+    # handle target2 if present
+    if target2:
+        boxes2 = target2['boxes']
+        labels2 = ["cat" if label.item() == 1 else "not cat" for label in target2['labels']]
+        image_with_boxes = torchvision.utils.draw_bounding_boxes(image_with_boxes, boxes2, fill=False, colors="blue", width=3, labels=labels2)
+    
+    return F.to_pil_image(image_with_boxes)

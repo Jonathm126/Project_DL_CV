@@ -49,6 +49,9 @@ class SoSiDetectionModel(torch.nn.Module):
         x = self.final_conv(x)
         # use the bounding box head
         bbox = self.bbox_head(x)
+        # clip the bbox to the image dims
+        h,w = x.shape[-2:]
+        torchvision.ops.clip_boxes_to_image(bbox, (h,w))
         # use the classifying head
         class_logits = self.class_head(x)
 
