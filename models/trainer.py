@@ -73,6 +73,7 @@ class Trainer:
             self.step_idx += 1
             self.writer.add_scalars("Train/Loss", {"BoundingBox": batch_bbox_loss ,"Classification": batch_class_loss, "Total": batch_loss}, self.step_idx)
             self.writer.add_scalar("Train/Acc", batch_acc, self.step_idx)
+            self.writer.add_scalar("Train/Lr", self.scheduler.get_last_lr()[0], self.step_idx)
 
     def validate_epoch(self, epoch_idx):
         self.model.eval()
