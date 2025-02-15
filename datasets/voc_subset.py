@@ -69,6 +69,7 @@ class VOCSubset(VOCDetection):
         if self.selected_label in torch_target['labels']:
             # get the index of the first insacnce of the selected label
             selected_idx = (torch_target['labels'] == self.selected_label).nonzero(as_tuple=False)[0].item()
+            
             # filter the target dict
             torch_target['boxes'].data = torch_target['boxes'].data[selected_idx:selected_idx+1]
             torch_target['labels'] = torch_target['labels'][selected_idx:selected_idx+1]

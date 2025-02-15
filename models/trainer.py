@@ -1,20 +1,26 @@
 # torch
 import torch
-from torch.utils.tensorboard import SummaryWriter
+import random
+from torchvision.utils import make_grid
 
 # visualizer
 from tqdm import tqdm
 
+# my imports
+from utils.plot_utils import scsi_images_bbox_grid
 
 class Trainer:
-    def __init__(self, device, model, optimizer, train_dataloader, val_dataloader, losses, lr_scheduler = None, stopping_patience = None):
+    def __init__(self, device, model, optimizer, train_dataloader, val_dataloader, losses, writer, lr_scheduler = None, stopping_patience = None):
         ''' Trainer class.  
             Inputs:
             - device: torch.device
+            - model: the model to train
             - optimizer updated with the model parameters
-            - dataloaders 
+            - dataloaders (Train and validation)
             - loss function: list of two [box_loss, class_loss]
+            - the tensorboard writer, initiated outside of the trainer
             - lr_scheduler - optional - lr scheduler wrapping the optimizer.
+            - stopping patience - optional - to use early stopping
         '''
         # init
         self.device = device
@@ -24,6 +30,7 @@ class Trainer:
         self.optimizer = optimizer
         self.scheduler = lr_scheduler
         self.stopping_patience = stopping_patience
+        
         # train step counter
         self.step_idx = 0
 
@@ -32,14 +39,14 @@ class Trainer:
         self.class_loss_fn = losses[1] # for the classifier use the second loss type
         
         # TensorBoard writer
-        self.writer = SummaryWriter()
-        # add the model graph to the writer
-        sim_image = torch.randint(low=0, high=256, size=(1, 3, 224, 224), dtype=torch.float32).to(device)
-        self.writer.add_graph(model, sim_image)
+        self.writer = writer
+        
+        # select image indices for plotting every X epochs
+        self.img_idx = random.sample(range(len(self.val_dataloader.dataset)), k=8)
 
     def train_epoch(self, epoch_idx):
         self.model.train()
-                
+        
         # loop over the data
         for images, targets in tqdm(self.train_dataloader, desc=f"Training Epoch {epoch_idx+1}"):
             # organize data
@@ -64,16 +71,12 @@ class Trainer:
             acc = self.compute_predictions(pred_labels)
             batch_acc = (acc == labels).float().sum().item()
             
-            # average stats for batch length
-            batch_size = images.shape[0]
-            stats = (bbox_loss.item(), class_loss.item(), loss.item(), batch_acc)
-            batch_bbox_loss, batch_class_loss, batch_loss, batch_acc = (x / batch_size for x in stats)
-            
             # Log losses to TensorBoard
-            self.step_idx += 1
-            self.writer.add_scalars("Train/Loss", {"BoundingBox": batch_bbox_loss ,"Classification": batch_class_loss, "Total": batch_loss}, self.step_idx)
-            self.writer.add_scalar("Train/Acc", batch_acc, self.step_idx)
+            batch_size = images.shape[0]
+            self.writer.add_scalars("Train/Loss", {"BoundingBox": bbox_loss.item() ,"Classification": class_loss.item(), "Total": loss.item()}, self.step_idx)
+            self.writer.add_scalar("Train/Acc", batch_acc / batch_size, self.step_idx)
             self.writer.add_scalar("Train/Lr", self.scheduler.get_last_lr()[0], self.step_idx)
+            self.step_idx += 1
 
     def validate_epoch(self, epoch_idx):
         self.model.eval()
@@ -112,19 +115,27 @@ class Trainer:
         
         return epoch_total_loss
 
-    def train(self, max_epochs):
+    def train(self, max_epochs, log_images_every = None):
+        # early stopping
+        best_loss, counter = float('inf'), 0
+        
         # start epochs run
         for epoch_idx in range(max_epochs):
             # train
             self.train_epoch(epoch_idx)
+            
             # validate
             val_loss = self.validate_epoch(epoch_idx)
-            # lr schedule
+            
+            # log image results if not None
+            if epoch_idx % log_images_every == 0 and log_images_every is not None:
+                self.tb_log_images(epoch_idx)
+            
+            # lr scheduler
             if self.scheduler:
                 self.scheduler.step()
-            # early stopping
-            best_loss, counter = float('inf'), 0
-            # check to see if we improved
+            
+            # earlys topping mechanism
             if self.stopping_patience is not None:
                 if val_loss < best_loss:
                     best_loss = val_loss
@@ -141,3 +152,28 @@ class Trainer:
     def compute_predictions(self, pred_labels):
         '''counts the number of correct predictions (lables)'''
         return (torch.sigmoid(pred_labels) > 0.5).float() if pred_labels.shape[1] == 1 else pred_labels.argmax(1)
+    
+    def tb_log_images(self, epoch_idx):
+        images_with_boxes = []
+        with torch.no_grad():
+            # scan the pre-selected random image indices
+            for i, idx in enumerate(self.img_idx):
+                # get ground truth
+                img, target = self.val_dataloader.dataset[idx]  
+                img = img.to(self.device).unsqueeze(0)  # add batch dimension
+                
+                # run model inference
+                pred = self.model(img)
+                
+                # call helper to organize the image
+                img_with_boxes = scsi_images_bbox_grid(img, target, pred, self.model.backbone_transforms())
+                images_with_boxes.append(img_with_boxes)
+                
+            # convert to grid row (1 row, N columns)
+            img_grid = make_grid(torch.stack(images_with_boxes), nrow=len(images_with_boxes))
+
+            # log to TensorBoard
+            self.writer.add_image(f"Img/Val_Results_Epoch_{epoch_idx}", img_grid, epoch_idx)
+
+            # add to tb
+            self.writer.add_image(f"Img/Val Results, Epoch = {epoch_idx}", img_grid, epoch_idx)

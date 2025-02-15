@@ -28,8 +28,12 @@ voc_class_to_idx = {
 def voc_idx_to_class(labels):
     ''' Does the reverse of voc_class_to_idx.'''
     class_names_list = list(voc_class_to_idx.keys())
+    # ensure `labels` is a list (convert single integer to list)
+    if isinstance(labels, int):  
+        labels = [labels]  
+    elif isinstance(labels, torch.Tensor):  
+        labels = labels.tolist()  #
     idx = [class_names_list[label - 1] for label in labels]
-    
     return idx
 
 def parse_target_voc_torch(image, target):
