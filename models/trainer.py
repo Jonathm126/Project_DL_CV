@@ -7,7 +7,7 @@ from torchvision.utils import make_grid
 from tqdm import tqdm
 
 # my imports
-from utils.plot_utils import scsi_images_bbox_grid
+from utils import voc_utils, plot_utils
 
 class Trainer:
     def __init__(self, device, model, optimizer, train_dataloader, val_dataloader, losses, writer, lr_scheduler = None, stopping_patience = None):
@@ -68,8 +68,8 @@ class Trainer:
             self.optimizer.step()
             
             # count how many correct predictions were there
-            acc = self.compute_predictions(pred_labels)
-            batch_acc = (acc == labels).float().sum().item()
+            pred_labels = self.compute_predictions(pred_labels)
+            batch_acc = (pred_labels == labels).float().sum().item()
             
             # Log losses to TensorBoard
             batch_size = images.shape[0]
@@ -105,6 +105,7 @@ class Trainer:
                 epoch_acc += (predicted == labels).float().sum().item()
         
         # average for epoch length
+        #TODO probably wrong epoch loss calculation
         val_size = len(self.val_dataloader.dataset)
         stats = (epoch_bbox_loss, epoch_class_loss, epoch_total_loss, epoch_acc)
         epoch_bbox_loss, epoch_class_loss, epoch_total_loss, epoch_acc = (x / val_size for x in stats)
@@ -153,22 +154,31 @@ class Trainer:
         '''counts the number of correct predictions (lables)'''
         return (torch.sigmoid(pred_labels) > 0.5).float() if pred_labels.shape[1] == 1 else pred_labels.argmax(1)
     
-    def tb_log_images(self, epoch_idx):
+    def tb_log_voc_images(self, epoch_idx):
         images_with_boxes = []
         with torch.no_grad():
             # scan the pre-selected random image indices
-            for i, idx in enumerate(self.img_idx):
+            for idx in self.img_idx:
                 # get ground truth
                 img, target = self.val_dataloader.dataset[idx]  
                 img = img.to(self.device).unsqueeze(0)  # add batch dimension
                 
-                # run model inference
-                pred = self.model(img)
+                # run model inference and convert to probabilities
+                pred_bboxes, pred_labels = self.model(img)
+                pred_labels = self.compute_predictions(pred_labels)
                 
-                # call helper to organize the image
-                img_with_boxes = scsi_images_bbox_grid(img, target, pred, self.model.backbone_transforms())
+                # convert labels to strings
+                pred_label_str = voc_utils.voc_idx_to_class(pred_labels.squeeze(0).tolist())
+                target_label_str = voc_utils.voc_idx_to_class(target["labels"].tolist())
+                
+                # un-normalize image
+                mean, std = self.model.backbone_transforms().mean, self.model.backbone_transforms().std
+                img = plot_utils.unnormalize(img, mean, std) 
+                
+                # build bbox with labels
+                img_with_boxes = plot_utils.voc_img_bbox_plot(img.squeeze(0).cpu(), target["boxes"].cpu(), target_label_str, pred_bboxes.cpu(), pred_label_str)
                 images_with_boxes.append(img_with_boxes)
-                
+            
             # convert to grid row (1 row, N columns)
             img_grid = make_grid(torch.stack(images_with_boxes), nrow=len(images_with_boxes))
 
