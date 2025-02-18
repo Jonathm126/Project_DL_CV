@@ -1,6 +1,8 @@
 # import torch
 from torchvision.datasets import VOCDetection
 from torchvision.ops import box_area
+from torchvision.tv_tensors import BoundingBoxes
+from torch import ones_like, zeros_like, float32
 
 # my imports
 from config import config
@@ -49,15 +51,11 @@ class VOCSubset(VOCDetection):
         # convert the object to torch notation
         torch_target = voc_utils.parse_target_voc_torch(image, target)
         
-        # if the target should only contain a single object (instance) per frame
+        # filter the result according to the single class \ single instance option
         torch_target = self.single_instance_and_filter(torch_target)
         
         # call the transform after parsing the target
         image, torch_target = self.both_transform(image, torch_target)
-        
-        # converts to binary labels, true if the label is the model selected label
-        # TODO this was moved to 
-        # torch_target['labels'] = (torch_target['labels'] == self.selected_label).float()
         
         return image, torch_target
     
@@ -93,15 +91,21 @@ class VOCSubset(VOCDetection):
         boxes = torch_target['boxes']
         labels = torch_target['labels']
         
+        # get boxes data
+        boxes_format = boxes.format
+        boxes_canvas_size = boxes.canvas_size
+        
         # if single object per image:
         if self.selected_label is not None:
             # filter for objects matching the selected label
             mask = (labels == self.selected_label)
             if mask.sum() > 0:
-            # if the selected object is in the frame - return only that
+                # If selected object is in the frame, keep only those objects
                 boxes = boxes[mask]
-                labels = labels[mask]
-            # else: no object matches the selected label → fall back to all objects
+                labels = ones_like(labels[mask], dtype = float32)  # Set labels to 1 for selected objects
+            else:
+                # If the selected object is NOT in the frame, keep all objects but set labels to 0
+                labels = zeros_like(labels, dtype = float32)  # Set all labels to 0
         
         # if single instance per image:
         if self.single_instance:
@@ -112,5 +116,8 @@ class VOCSubset(VOCDetection):
             # return the largest box and label
             boxes = boxes[largest_idx:largest_idx + 1]
             labels = labels[largest_idx:largest_idx + 1]
+            
+        # **Re-wrap boxes as BoundingBoxes to maintain type**
+        boxes = BoundingBoxes(boxes, format=boxes_format, canvas_size=boxes_canvas_size)
         
         return {'boxes': boxes, 'labels': labels}

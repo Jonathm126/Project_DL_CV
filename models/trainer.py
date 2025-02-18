@@ -130,7 +130,7 @@ class Trainer:
             
             # log image results if not None
             if epoch_idx % log_images_every == 0 and log_images_every is not None:
-                self.tb_log_images(epoch_idx)
+                self.tb_log_voc_images(epoch_idx)
             
             # lr scheduler
             if self.scheduler:
@@ -147,8 +147,6 @@ class Trainer:
                     if counter >= self.stopping_patience:
                         print("Early stopping triggered. Training terminated.")
                         break
-
-        self.writer.close()
     
     def compute_predictions(self, pred_labels):
         '''counts the number of correct predictions (lables)'''
@@ -181,9 +179,6 @@ class Trainer:
             
             # convert to grid row (1 row, N columns)
             img_grid = make_grid(torch.stack(images_with_boxes), nrow=len(images_with_boxes))
-
+            
             # log to TensorBoard
             self.writer.add_image(f"Img/Val_Results_Epoch_{epoch_idx}", img_grid, epoch_idx)
-
-            # add to tb
-            self.writer.add_image(f"Img/Val Results, Epoch = {epoch_idx}", img_grid, epoch_idx)

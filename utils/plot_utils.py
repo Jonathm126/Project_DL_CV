@@ -6,11 +6,8 @@ import torch
 import torchvision 
 import torchvision.transforms.functional as F
 
-# my imports
-from utils import voc_utils
-
 # un-normalize a normalized image
-def unnormalize(image, mean, std):
+def unnormalize(image, mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225]):
     """
     Returns a transform that reverses normalization.
     """
@@ -29,20 +26,22 @@ def plot_images_from_voc_dataset(dataset, num_images=8, title="Dataset Images"):
     """
     random_indices = random.sample(range(len(dataset)), num_images)
     
-    fig, axes = plt.subplots(num_images // 4, 4, figsize=(12, 4))
+    _, axes = plt.subplots(num_images // 4, 4, figsize=(12, 4))
     axes = axes.flatten()
 
     for i, idx in enumerate(random_indices):
         # Get image and target
-        image, torch_target = dataset[idx]
+        image, target = dataset[idx]
         
         # Convert image and draw bounding boxes
-        image_with_boxes_PIL = voc_img_bbox_plot(image, torch_target)
+        image_un_norm = unnormalize(image)
+        image_with_boxes = voc_img_bbox_plot(image_un_norm, target['boxes'], target['labels'])
+        image_with_boxes_PIL = F.to_pil_image(image_with_boxes)
         
         # Plot the image
         axes[i].imshow(image_with_boxes_PIL)
         axes[i].axis("off")
-        axes[i].set_title(f"Image {idx}")
+        axes[i].set_title(f"Image {idx}, label: {target['labels'].item()}")
 
     plt.suptitle(title, fontsize=16)
     plt.tight_layout()
@@ -53,18 +52,25 @@ def voc_img_bbox_plot(image, boxes1, labels1, boxes2 = None, labels2 = None):
     '''Helper function to plot bounding boxes on an image, given labels and boxes.
         Input:
         - image1 - torch float32
-        - boxes, labels - torch format target structure
+        - boxes, labels - torch format target structure 
         - image2, boxes2, labels2 - optinal - similar
-        Output: tensor.
+        Output: Tensor image
     '''
     # convert iamge to uint8
     image_uint8 = (image * 255).to(torch.uint8) 
 
-    # Process target1 (Red boxes)
+    # convert labels to a list of strings only if they are a tensor
+    if isinstance(labels1, torch.Tensor):
+        labels1 = [str(label.item()) for label in labels1] 
+    # process target1 (red boxes)
     image_with_boxes = torchvision.utils.draw_bounding_boxes(image_uint8, 
                                                             boxes1, fill=False, colors="red", width=3, labels=labels1)
     # handle target2 if present
     if boxes2:
+        # convert labels to a list of strings only if they are a tensor
+        if isinstance(labels1, torch.Tensor):
+            labels2 = [str(label.item()) for label in labels2] 
+        # process target2 (blue boxes)
         image_with_boxes = torchvision.utils.draw_bounding_boxes(image_with_boxes, 
                                                                 boxes2, fill=False, colors="blue", width=3, labels=labels2)
     return image_with_boxes
