@@ -58,7 +58,7 @@ def voc_img_bbox_plot(image, boxes1, labels1, boxes2 = None, labels2 = None):
     '''
     # convert iamge to uint8
     image_uint8 = (image * 255).to(torch.uint8) 
-
+    
     # convert labels to a list of strings only if they are a tensor
     if isinstance(labels1, torch.Tensor):
         labels1 = [str(label.item()) for label in labels1] 
@@ -66,41 +66,11 @@ def voc_img_bbox_plot(image, boxes1, labels1, boxes2 = None, labels2 = None):
     image_with_boxes = torchvision.utils.draw_bounding_boxes(image_uint8, 
                                                             boxes1, fill=False, colors="red", width=3, labels=labels1)
     # handle target2 if present
-    if boxes2:
+    if boxes2 is not None:
         # convert labels to a list of strings only if they are a tensor
-        if isinstance(labels1, torch.Tensor):
+        if isinstance(labels2, torch.Tensor):
             labels2 = [str(label.item()) for label in labels2] 
         # process target2 (blue boxes)
         image_with_boxes = torchvision.utils.draw_bounding_boxes(image_with_boxes, 
                                                                 boxes2, fill=False, colors="blue", width=3, labels=labels2)
     return image_with_boxes
-
-# # TODO obsolete
-# def scsi_images_bbox_grid(img, target, pred, backbone_transforms = None):
-#     """
-#     Helper function to plot bounding boxes and labels for the single class, single instance case. 
-#     Handles conversion of the label, etc.
-#     Inputs:
-#     - img: original image
-#     - target: ground truth data
-#     - pred: model's prediction
-#     - backbone transforms: for un-normalization
-#     """
-#     pred_bboxes, pred_labels = pred
-    
-#     # sigmoid for binary classification
-#     pred_labels = (torch.sigmoid(pred_labels) > 0.5).long()
-    
-#     # handle labels - convert from number to string
-#     pred_label_str = voc_utils.voc_idx_to_class(pred_labels.squeeze(0).tolist())
-#     target_label_str = voc_utils.voc_idx_to_class(target["labels"].tolist())
-    
-#     # un-normalize image if data is supplied
-#     if backbone_transforms:
-#         mean, std = backbone_transforms().mean, backbone_transforms().std
-#         img = unnormalize(img, mean, std) 
-        
-#     # get bbox
-#     return voc_img_bbox_plot(img.squeeze(0).cpu(), 
-#                     target["boxes"].cpu(), target_label_str,
-#                     pred_bboxes.cpu(), pred_label_str)

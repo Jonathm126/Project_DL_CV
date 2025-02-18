@@ -41,8 +41,6 @@ class Trainer:
         # TensorBoard writer
         self.writer = writer
         
-        # select image indices for plotting every X epochs
-        self.img_idx = random.sample(range(len(self.val_dataloader.dataset)), k=8)
 
     def train_epoch(self, epoch_idx):
         self.model.train()
@@ -116,9 +114,14 @@ class Trainer:
         
         return epoch_total_loss
 
-    def train(self, max_epochs, log_images_every = None):
+    def train(self, max_epochs, log_images_every = None, img_plot_qty = 12):
         # early stopping
         best_loss, counter = float('inf'), 0
+        
+        #  image logging params
+        if log_images_every is not None:
+            # select image indices for plotting every X epochs
+            self.img_idx = random.sample(range(len(self.val_dataloader.dataset)), k=img_plot_qty)
         
         # start epochs run
         for epoch_idx in range(max_epochs):
@@ -136,7 +139,7 @@ class Trainer:
             if self.scheduler:
                 self.scheduler.step()
             
-            # earlys topping mechanism
+            # early stopping mechanism
             if self.stopping_patience is not None:
                 if val_loss < best_loss:
                     best_loss = val_loss
@@ -147,6 +150,9 @@ class Trainer:
                     if counter >= self.stopping_patience:
                         print("Early stopping triggered. Training terminated.")
                         break
+        
+        # log last image grid and return
+        return self.tb_log_voc_images(epoch_idx)
     
     def compute_predictions(self, pred_labels):
         '''counts the number of correct predictions (lables)'''
@@ -165,20 +171,17 @@ class Trainer:
                 pred_bboxes, pred_labels = self.model(img)
                 pred_labels = self.compute_predictions(pred_labels)
                 
-                # convert labels to strings
-                pred_label_str = voc_utils.voc_idx_to_class(pred_labels.squeeze(0).tolist())
-                target_label_str = voc_utils.voc_idx_to_class(target["labels"].tolist())
-                
                 # un-normalize image
                 mean, std = self.model.backbone_transforms().mean, self.model.backbone_transforms().std
                 img = plot_utils.unnormalize(img, mean, std) 
                 
-                # build bbox with labels
-                img_with_boxes = plot_utils.voc_img_bbox_plot(img.squeeze(0).cpu(), target["boxes"].cpu(), target_label_str, pred_bboxes.cpu(), pred_label_str)
+                # plot bbox of target and prediction with labels
+                img_with_boxes = plot_utils.voc_img_bbox_plot(img.squeeze(0), target["boxes"], target["labels"], pred_bboxes, pred_labels.squeeze(0))
                 images_with_boxes.append(img_with_boxes)
             
             # convert to grid row (1 row, N columns)
-            img_grid = make_grid(torch.stack(images_with_boxes), nrow=len(images_with_boxes))
+            img_grid = make_grid(torch.stack(images_with_boxes), nrow=6)
             
             # log to TensorBoard
             self.writer.add_image(f"Img/Val_Results_Epoch_{epoch_idx}", img_grid, epoch_idx)
+            return img_grid

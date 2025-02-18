@@ -32,8 +32,8 @@ def voc_idx_to_class(labels):
     if isinstance(labels, int):  
         labels = [labels]  
     elif isinstance(labels, torch.Tensor):  
-        labels = labels.tolist()  #
-    idx = [class_names_list[label - 1] for label in labels]
+        labels = labels.tolist() 
+    idx = [class_names_list[int(label) - 1] for label in labels]
     return idx
 
 def parse_target_voc_torch(image, target):

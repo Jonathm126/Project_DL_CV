@@ -59,28 +59,6 @@ class VOCSubset(VOCDetection):
         
         return image, torch_target
     
-    # def single_instance_and_filter(self, torch_target):
-    # TODO Obsolete
-    #     '''Filter the annotations to include only one object for image. If this objet is the selected class, it will be presented.
-    #         Input: target in torch format.'''
-    #     # TODO this gives priority to the selected target and also filters. in multiple instances we will need to change
-        
-    #     # if the selected class is in the image
-    #     if self.selected_label in torch_target['labels']:
-    #         # get the index of the first insacnce of the selected label
-    #         selected_idx = (torch_target['labels'] == self.selected_label).nonzero(as_tuple=False)[0].item()
-            
-    #         # filter the target dict
-    #         torch_target['boxes'].data = torch_target['boxes'].data[selected_idx:selected_idx+1]
-    #         torch_target['labels'] = torch_target['labels'][selected_idx:selected_idx+1]
-        
-    #     # if the selected class is not in the image, return first instance of the other label
-    #     else:
-    #         torch_target['boxes'].data = torch_target['boxes'].data[:1]
-    #         torch_target['labels'] = torch_target['labels'][:1]
-
-    #     return torch_target
-    
     def single_instance_and_filter(self, torch_target):
         '''filters annotations per frame based on the following rules:
         - If `self.selected_label` and we are in selected label mode, exists in the image, set labels to 1.
