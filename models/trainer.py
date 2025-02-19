@@ -8,7 +8,7 @@ from torchvision.ops import box_iou
 from tqdm import tqdm
 
 # my imports
-from utils import voc_utils, plot_utils
+from utils import plot_utils
 
 class Trainer:
     def __init__(self, device, model, optimizer, train_dataloader, val_dataloader, losses, writer, lr_scheduler = None, stopping_patience = None):
@@ -57,7 +57,7 @@ class Trainer:
             pred_boxes, pred_labels_logits= self.model(images)
             
             # compute loss
-            bbox_loss = self.bbox_loss_fn(pred_boxes, bboxes.squeeze(1))
+            bbox_loss = self.bbox_loss_fn(pred_boxes, bboxes.squeeze(1))#, reduction = 'mean'
             class_loss = self.class_loss_fn(pred_labels_logits, labels)
             loss = bbox_loss + class_loss
             
@@ -90,7 +90,7 @@ class Trainer:
                 pred_bboxes, pred_labels_logits = self.model(images)
                 
                 # loss
-                bbox_loss = self.bbox_loss_fn(pred_bboxes, bboxes.squeeze(1))
+                bbox_loss = self.bbox_loss_fn(pred_bboxes, bboxes.squeeze(1)) #, reduction = 'mean'
                 class_loss = self.class_loss_fn(pred_labels_logits, labels)
                 loss = bbox_loss + class_loss
                 
