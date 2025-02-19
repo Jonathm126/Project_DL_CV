@@ -63,14 +63,20 @@ def voc_img_bbox_plot(image, boxes1, labels1, boxes2 = None, labels2 = None):
     if isinstance(labels1, torch.Tensor):
         labels1 = [str(label.item()) for label in labels1] 
     # process target1 (red boxes)
-    image_with_boxes = torchvision.utils.draw_bounding_boxes(image_uint8, 
-                                                            boxes1, fill=False, colors="red", width=3, labels=labels1)
+    try:
+        image_with_boxes = torchvision.utils.draw_bounding_boxes(image_uint8, 
+                                                                boxes1, fill=False, colors="red", width=3, labels=labels1)
+    except Exception:
+        image_with_boxes = image_uint8
     # handle target2 if present
     if boxes2 is not None:
         # convert labels to a list of strings only if they are a tensor
         if isinstance(labels2, torch.Tensor):
             labels2 = [str(label.item()) for label in labels2] 
         # process target2 (blue boxes)
-        image_with_boxes = torchvision.utils.draw_bounding_boxes(image_with_boxes, 
-                                                                boxes2, fill=False, colors="blue", width=3, labels=labels2)
+        try:
+            image_with_boxes = torchvision.utils.draw_bounding_boxes(image_with_boxes, 
+                                                                    boxes2, fill=False, colors="blue", width=3, labels=labels2)
+        except Exception:
+            pass
     return image_with_boxes

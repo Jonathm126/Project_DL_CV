@@ -2,6 +2,7 @@
 import torch
 import random
 from torchvision.utils import make_grid
+from torchvision.ops import box_iou
 
 # visualizer
 from tqdm import tqdm
@@ -53,11 +54,11 @@ class Trainer:
             labels = targets['labels'].to(self.device)   # single tensor (N, 1)
             
             # forward pass
-            pred_boxes, pred_labels= self.model(images)
+            pred_boxes, pred_labels_logits= self.model(images)
             
             # compute loss
             bbox_loss = self.bbox_loss_fn(pred_boxes, bboxes.squeeze(1))
-            class_loss = self.class_loss_fn(pred_labels, labels)
+            class_loss = self.class_loss_fn(pred_labels_logits, labels)
             loss = bbox_loss + class_loss
             
             # backward pass + update
@@ -65,52 +66,52 @@ class Trainer:
             loss.backward()
             self.optimizer.step()
             
-            # count how many correct predictions were there
-            pred_labels = self.compute_predictions(pred_labels)
-            batch_acc = (pred_labels == labels).float().sum().item()
+            # compute stats
+            pred_labels = self.compute_predictions(pred_labels_logits)
+            batch_acc, batch_iou = self.compute_batch_stats(pred_labels, labels, pred_boxes, bboxes.squeeze(1))
             
             # Log losses to TensorBoard
-            batch_size = images.shape[0]
             self.writer.add_scalars("Train/Loss", {"BoundingBox": bbox_loss.item() ,"Classification": class_loss.item(), "Total": loss.item()}, self.step_idx)
-            self.writer.add_scalar("Train/Acc", batch_acc / batch_size, self.step_idx)
+            self.writer.add_scalars("Train/Stats", {"Acc" : batch_acc, "IoU" : batch_iou}, self.step_idx)
             self.writer.add_scalar("Train/Lr", self.scheduler.get_last_lr()[0], self.step_idx)
             self.step_idx += 1
 
     def validate_epoch(self, epoch_idx):
         self.model.eval()
-        epoch_bbox_loss, epoch_class_loss, epoch_total_loss, epoch_acc = 0, 0, 0, 0
+        epoch_bbox_loss, epoch_class_loss, epoch_total_loss, epoch_acc, epoch_iou = 0, 0, 0, 0, 0
         
         with torch.no_grad():
-            for images, targets in tqdm(self.val_dataloader,  desc=f"Validation Epoch {epoch_idx+1}"):
+            for batch_idx, (images, targets) in enumerate(tqdm(self.val_dataloader,  desc=f"Validation Epoch {epoch_idx+1}")):
                 images = images.to(self.device) # (N, 3, H, W)
                 bboxes = targets['boxes'].to(self.device)  # single tensor (N, 1, 4)
                 labels = targets['labels'].to(self.device)   # single tensor (N, 1)
                 
                 # predict
-                pred_bboxes, pred_labels = self.model(images)
+                pred_bboxes, pred_labels_logits = self.model(images)
                 
                 # loss
                 bbox_loss = self.bbox_loss_fn(pred_bboxes, bboxes.squeeze(1))
-                class_loss = self.class_loss_fn(pred_labels, labels)
+                class_loss = self.class_loss_fn(pred_labels_logits, labels)
                 loss = bbox_loss + class_loss
                 
                 epoch_bbox_loss += bbox_loss.item()
                 epoch_class_loss += class_loss.item()
                 epoch_total_loss += loss.item()
                 
-                # compute correct predictions
-                predicted = self.compute_predictions(pred_labels)
-                epoch_acc += (predicted == labels).float().sum().item()
+                # compute stats
+                pred_labels = self.compute_predictions(pred_labels_logits)
+                batch_acc, batch_iou = self.compute_batch_stats(pred_labels, labels, pred_bboxes, bboxes.squeeze(1))
+                
+                epoch_acc += batch_acc
+                epoch_iou += batch_iou
         
         # average for epoch length
-        #TODO probably wrong epoch loss calculation
-        val_size = len(self.val_dataloader.dataset)
-        stats = (epoch_bbox_loss, epoch_class_loss, epoch_total_loss, epoch_acc)
-        epoch_bbox_loss, epoch_class_loss, epoch_total_loss, epoch_acc = (x / val_size for x in stats)
+        stats = (epoch_bbox_loss, epoch_class_loss, epoch_total_loss, epoch_acc, epoch_iou)
+        epoch_bbox_loss, epoch_class_loss, epoch_total_loss, epoch_acc, epoch_iou = tuple(x / (batch_idx + 1) for x in stats)
         
         # log
         self.writer.add_scalars("Val/Loss", {"BoundingBox": epoch_bbox_loss ,"Classification": epoch_class_loss, "Total": epoch_total_loss}, self.step_idx)
-        self.writer.add_scalar("Val/Acc", epoch_acc, self.step_idx)
+        self.writer.add_scalars("Val/stats", {"Acc": epoch_acc, "IoU": epoch_iou}, self.step_idx)
         
         return epoch_total_loss
 
@@ -136,7 +137,7 @@ class Trainer:
                 self.tb_log_voc_images(epoch_idx)
             
             # lr scheduler
-            if self.scheduler:
+            if self.scheduler is not None:
                 self.scheduler.step()
             
             # early stopping mechanism
@@ -154,9 +155,22 @@ class Trainer:
         # log last image grid and return
         return self.tb_log_voc_images(epoch_idx)
     
-    def compute_predictions(self, pred_labels):
-        '''counts the number of correct predictions (lables)'''
-        return (torch.sigmoid(pred_labels) > 0.5).float() if pred_labels.shape[1] == 1 else pred_labels.argmax(1)
+    def compute_predictions(self, logits_labels):
+        '''converts the logits to label predictions'''
+        return (torch.sigmoid(logits_labels) > 0.5).float() if logits_labels.shape[1] == 1 else logits_labels.argmax(1)
+    
+    def compute_batch_stats(self, pred_labels, labels, pred_boxes, boxes):
+        '''computes accuracy and IoU for a batch.'''
+        # compute accuracy
+        predicted = (pred_labels == labels).float().sum().item()
+        accuracy = predicted / len(labels)
+
+        # compute IoU
+        iou_matrix = box_iou(pred_boxes, boxes)  # Shape: (batch_size, batch_size)
+        batch_iou = iou_matrix.diag()  # Get the IoU of each bbox with itself
+        mean_iou = batch_iou.mean().item()  # Compute batch mean IoU
+        
+        return accuracy, mean_iou
     
     def tb_log_voc_images(self, epoch_idx):
         images_with_boxes = []
@@ -184,4 +198,5 @@ class Trainer:
             
             # log to TensorBoard
             self.writer.add_image(f"Img/Val_Results_Epoch_{epoch_idx}", img_grid, epoch_idx)
+            
             return img_grid

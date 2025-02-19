@@ -6,7 +6,7 @@ import torchvision
 # a custom class for the object detector module
 class SoSiDetectionModel(torch.nn.Module):
     '''Class for the single object, single instance (SoSi) detector utilizing MobileNet V3.'''
-    def __init__(self, freeze_backbone = True, shared_head_conv_depth = 64):
+    def __init__(self, freeze_backbone = True, final_head_conv_depth = 64):
         '''Init the single object, single instance (SoSi) detector utilizing MobileNet V3.'''
         # initialize super
         super().__init__()
@@ -25,19 +25,36 @@ class SoSiDetectionModel(torch.nn.Module):
         # the output depth of MobilNet Large is fixed at 960
         self.backbone_out_channels = 960 
         self.backbone_out_w = 7
-        self.shared_head_conv_depth = shared_head_conv_depth
+        self.final_head_conv_depth = final_head_conv_depth
         
-        # the final convolution
-        self.final_conv = nn.Sequential(
-            nn.Conv2d(self.backbone_out_channels, self.shared_head_conv_depth, kernel_size=3, padding=1),
+        # predict 4 bbox coordinates
+        # self.bbox_head = nn.Sequential(
+        #     nn.Conv2d(self.backbone_out_channels, self.final_head_conv_depth, kernel_size=3, padding=1),
+        #     nn.ReLU(),
+        #     nn.AdaptiveAvgPool2d(1),  
+        #     nn.Flatten(),  
+        #     nn.Linear(self.final_head_conv_depth, 4)
+        # )
+        
+        self.bbox_head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(self.backbone_out_channels, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 4)
+        )
+        
+        # predict object presence
+        self.class_head = nn.Sequential(
+            nn.Conv2d(self.backbone_out_channels, self.final_head_conv_depth, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.AdaptiveAvgPool2d(1),  
             nn.Flatten(),  
+            nn.Linear(self.final_head_conv_depth, 1)
         )
-        # predict 4 bbox coordinates
-        self.bbox_head = nn.Linear(self.shared_head_conv_depth, 4)  
-        # predict object presence
-        self.class_head = nn.Linear(self.shared_head_conv_depth, 1)  
         
         # save the standard transforms - given by default
         self.backbone_transforms = pretrained_weights.transforms
@@ -45,8 +62,6 @@ class SoSiDetectionModel(torch.nn.Module):
     def forward(self, x):
         # find feature vector
         x = self.backbone(x)
-        # one final conv to shared_head_conv_depth
-        x = self.final_conv(x)
         # use the bounding box head
         bbox = self.bbox_head(x)
         # clip the bbox to the image dims - TODO not sure about this
