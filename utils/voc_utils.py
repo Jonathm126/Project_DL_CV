@@ -1,5 +1,6 @@
 import torch
 from torchvision import tv_tensors
+from torchvision.ops import box_convert
 
 # define the voc class to numerical index dict
 voc_class_to_idx = {
@@ -55,8 +56,16 @@ def parse_target_voc_torch(image, target):
     
     # convert to torchvision tensor of type boundingbox
     boxes_tensor = torch.stack(boxes)
-    torch_target['boxes'] = tv_tensors.BoundingBoxes(boxes_tensor, format='XYXY', 
-                                                canvas_size=image.size[::-1], dtype=torch.float32)
-    torch_target['labels'] = torch.tensor(labels, dtype=torch.int64)  # shape: (N,)
+    
+    # normalize the tensors and convert to xywh
+    img_w, img_h = image.size
+    # TODO cancelled xywh
+    # boxes_tensor_xywh = box_convert(boxes_tensor, in_fmt = 'xyxy', out_fmt = 'xywh')
+    # boxes_tensor_xywh = boxes_tensor
+    
+    # convert to dict with Tvtensors
+    torch_target['boxes'] = tv_tensors.BoundingBoxes(boxes_tensor, format='xyxy',  # cancelled xywh
+                                                canvas_size=(img_h, img_w), dtype=torch.float32)
+    torch_target['labels'] = torch.tensor(labels, dtype=torch.int64)  # shape: (N,1)
     
     return torch_target

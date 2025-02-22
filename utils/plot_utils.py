@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import torch
 import torchvision 
 import torchvision.transforms.functional as F
+from torchvision.ops import box_convert
 
 # un-normalize a normalized image
 def unnormalize(image, mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225]):
@@ -32,24 +33,25 @@ def plot_images_from_voc_dataset(dataset, num_images=8, title="Dataset Images"):
     for i, idx in enumerate(random_indices):
         # Get image and target
         image, target = dataset[idx]
+        labels = ['Cat' if label == 1 else 'Else' for label in target['labels']]
         
         # Convert image and draw bounding boxes
         image_un_norm = unnormalize(image)
-        image_with_boxes = voc_img_bbox_plot(image_un_norm, target['boxes'], target['labels'])
+        image_with_boxes = voc_img_bbox_plot(image_un_norm, target['boxes'], labels)
         image_with_boxes_PIL = F.to_pil_image(image_with_boxes)
         
         # Plot the image
         axes[i].imshow(image_with_boxes_PIL)
         axes[i].axis("off")
-        axes[i].set_title(f"Image {idx}, label: {target['labels'].item()}")
+        axes[i].set_title(f"Image {idx}, label: {labels[0]}")
 
     plt.suptitle(title, fontsize=16)
     plt.tight_layout()
     plt.show()
-    
+
 # helper for transforming voc bbox to PIL
 def voc_img_bbox_plot(image, boxes1, labels1, boxes2 = None, labels2 = None):
-    '''Helper function to plot bounding boxes on an image, given labels and boxes.
+    '''Helper function to plot bounding boxes on a SINGLE image, given labels and boxes.
         Input:
         - image1 - torch float32
         - boxes, labels - torch format target structure 
@@ -63,20 +65,21 @@ def voc_img_bbox_plot(image, boxes1, labels1, boxes2 = None, labels2 = None):
     if isinstance(labels1, torch.Tensor):
         labels1 = [str(label.item()) for label in labels1] 
     # process target1 (red boxes)
-    try:
-        image_with_boxes = torchvision.utils.draw_bounding_boxes(image_uint8, 
-                                                                boxes1, fill=False, colors="red", width=3, labels=labels1)
+    try: # handle case of illeagl bbox
+        image_with_boxes = torchvision.utils.draw_bounding_boxes(image_uint8, boxes1, fill=False, colors="red", width=3, 
+                                                                labels=labels1, font_size=25, font = 'verdana.ttf',)
     except Exception:
         image_with_boxes = image_uint8
     # handle target2 if present
     if boxes2 is not None:
-        # convert labels to a list of strings only if they are a tensor
+        # process labels
         if isinstance(labels2, torch.Tensor):
             labels2 = [str(label.item()) for label in labels2] 
-        # process target2 (blue boxes)
-        try:
-            image_with_boxes = torchvision.utils.draw_bounding_boxes(image_with_boxes, 
-                                                                    boxes2, fill=False, colors="blue", width=3, labels=labels2)
+        try: # handle case of illeagl bbox
+            image_with_boxes = torchvision.utils.draw_bounding_boxes(image_with_boxes, boxes2, fill=False, colors="blue", width=3, 
+                                                                    labels=labels2, font_size=25, font = 'verdana.ttf')
         except Exception:
             pass
+        
     return image_with_boxes
+

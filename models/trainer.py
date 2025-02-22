@@ -57,7 +57,7 @@ class Trainer:
             pred_boxes, pred_labels_logits= self.model(images)
             
             # compute loss
-            bbox_loss = self.bbox_loss_fn(pred_boxes, bboxes.squeeze(1))#, reduction = 'mean'
+            bbox_loss = self.bbox_loss_fn(pred_boxes, bboxes)#, reduction = 'mean'
             class_loss = self.class_loss_fn(pred_labels_logits, labels)
             loss = bbox_loss + class_loss
             
@@ -68,7 +68,7 @@ class Trainer:
             
             # compute stats
             pred_labels = self.compute_predictions(pred_labels_logits)
-            batch_acc, batch_iou = self.compute_batch_stats(pred_labels, labels, pred_boxes, bboxes.squeeze(1))
+            batch_acc, batch_iou = self.compute_batch_stats(pred_labels, labels, pred_boxes, bboxes)
             
             # Log losses to TensorBoard
             self.writer.add_scalars("Train/Loss", {"BoundingBox": bbox_loss.item() ,"Classification": class_loss.item(), "Total": loss.item()}, self.step_idx)
@@ -82,15 +82,15 @@ class Trainer:
         
         with torch.no_grad():
             for batch_idx, (images, targets) in enumerate(tqdm(self.val_dataloader,  desc=f"Validation Epoch {epoch_idx+1}")):
-                images = images.to(self.device) # (N, 3, H, W)
-                bboxes = targets['boxes'].to(self.device)  # single tensor (N, 1, 4)
-                labels = targets['labels'].to(self.device)   # single tensor (N, 1)
+                images = images.to(self.device) # (B, 3, H, W)
+                bboxes = targets['boxes'].to(self.device)  # single tensor (B, N, 4)
+                labels = targets['labels'].to(self.device)   # single tensor (B, N)
                 
                 # predict
                 pred_bboxes, pred_labels_logits = self.model(images)
                 
                 # loss
-                bbox_loss = self.bbox_loss_fn(pred_bboxes, bboxes.squeeze(1)) #, reduction = 'mean'
+                bbox_loss = self.bbox_loss_fn(pred_bboxes, bboxes) #, reduction = 'mean'
                 class_loss = self.class_loss_fn(pred_labels_logits, labels)
                 loss = bbox_loss + class_loss
                 
@@ -100,7 +100,7 @@ class Trainer:
                 
                 # compute stats
                 pred_labels = self.compute_predictions(pred_labels_logits)
-                batch_acc, batch_iou = self.compute_batch_stats(pred_labels, labels, pred_bboxes, bboxes.squeeze(1))
+                batch_acc, batch_iou = self.compute_batch_stats(pred_labels, labels, pred_bboxes, bboxes)
                 
                 epoch_acc += batch_acc
                 epoch_iou += batch_iou
@@ -166,7 +166,7 @@ class Trainer:
         accuracy = predicted / len(labels)
 
         # compute IoU
-        iou_matrix = box_iou(pred_boxes, boxes)  # Shape: (batch_size, batch_size)
+        iou_matrix = box_iou(pred_boxes.view(-1, 4), boxes.view(-1, 4))  # Shape: (batch_size, batch_size)
         batch_iou = iou_matrix.diag()  # Get the IoU of each bbox with itself
         mean_iou = batch_iou.mean().item()  # Compute batch mean IoU
         

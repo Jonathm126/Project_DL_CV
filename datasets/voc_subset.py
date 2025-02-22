@@ -50,10 +50,8 @@ class VOCSubset(VOCDetection):
         image, target = super().__getitem__(image_idx)  
         # convert the object to torch notation
         torch_target = voc_utils.parse_target_voc_torch(image, target)
-        
         # filter the result according to the single class \ single instance option
         torch_target = self.single_instance_and_filter(torch_target)
-        
         # call the transform after parsing the target
         image, torch_target = self.both_transform(image, torch_target)
         
@@ -95,7 +93,7 @@ class VOCSubset(VOCDetection):
             boxes = boxes[largest_idx:largest_idx + 1]
             labels = labels[largest_idx:largest_idx + 1]
             
-        # **Re-wrap boxes as BoundingBoxes to maintain type**
+        # Re-wrap boxes as BoundingBoxes to maintain type
         boxes = BoundingBoxes(boxes, format=boxes_format, canvas_size=boxes_canvas_size)
         
         return {'boxes': boxes, 'labels': labels}

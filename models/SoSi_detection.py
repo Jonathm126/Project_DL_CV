@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 from torchvision.models import MobileNet_V3_Large_Weights, mobilenet_v3_large
 from torchvision.ops import clip_boxes_to_image
-from torchvision.tv_tensors import BoundingBoxes
 
 # a custom class for the object detector module
 class SoSiDetectionModel(torch.nn.Module):
@@ -62,14 +61,18 @@ class SoSiDetectionModel(torch.nn.Module):
         self.backbone_transforms = pretrained_weights.transforms
     
     def forward(self, x):
+        h,w = x.shape[-2:]
         # find feature vector
         x = self.backbone(x)
         # use the bounding box head
         bbox = self.bbox_head(x)
         # clip the bbox to the image dims - TODO not sure about this
-        h,w = x.shape[-2:]
-        # bbox = clip_boxes_to_image(bbox, (h,w))
-        bbox = BoundingBoxes(bbox, format='XYXY', canvas_size=(h,w), dtype=torch.float32)
-        # use the classifying head
+        bbox = clip_boxes_to_image(bbox, (h,w))
+        # shape the output to [B,N,4] to match the multi instance case
+        bbox = bbox.unsqueeze(1)
+        # get the classifier
         class_logits = self.class_head(x)
+        # shape the output to [B,N,1] to match the multi instance case
+        class_logits = class_logits
+        
         return bbox, class_logits
