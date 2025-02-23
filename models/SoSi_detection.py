@@ -29,24 +29,30 @@ class SoSiDetectionModel(torch.nn.Module):
         self.final_head_conv_depth = final_head_conv_depth
         
         # predict 4 bbox coordinates
-        self.bbox_head = nn.Sequential(
-            nn.Conv2d(self.backbone_out_channels, self.final_head_conv_depth, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d(1),  
-            nn.Flatten(),  
-            nn.Linear(self.final_head_conv_depth, 4)
-        )
-        
         # self.bbox_head = nn.Sequential(
-        #     nn.Flatten(),
-        #     nn.Linear(self.backbone_out_channels * self.backbone_out_w * self.backbone_out_w, 128),
+        #     nn.Conv2d(self.backbone_out_channels, self.final_head_conv_depth, kernel_size=3, padding=1),
+        #     nn.BatchNorm2d(self.final_head_conv_depth),
         #     nn.ReLU(),
-        #     nn.Linear(128, 64),
+        #     # nn.AdaptiveAvgPool2d(1),  # testing
+        #     nn.Flatten(),  
+        #     nn.Linear(self.final_head_conv_depth * (self.backbone_out_w ** 2), 64),
         #     nn.ReLU(),
-        #     nn.Linear(64, 32),
-        #     nn.ReLU(),
-        #     nn.Linear(32, 4)
+        #     nn.Linear(64, 4),
+        #     # add sigmoid since the output is normalized TODO is this good?
+        #     nn.Sigmoid()
         # )
+        
+        self.bbox_head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(self.backbone_out_channels * (self.backbone_out_w ** 2), 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 4),
+            nn.Sigmoid()
+        )
         
         # predict object presence
         self.class_head = nn.Sequential(
@@ -61,13 +67,12 @@ class SoSiDetectionModel(torch.nn.Module):
         self.backbone_transforms = pretrained_weights.transforms
     
     def forward(self, x):
-        h,w = x.shape[-2:]
         # find feature vector
         x = self.backbone(x)
         # use the bounding box head
         bbox = self.bbox_head(x)
-        # clip the bbox to the image dims - TODO not sure about this
-        bbox = clip_boxes_to_image(bbox, (h,w))
+        # clip the bbox to 0,1 - bbox is normalized
+        # bbox = clip_boxes_to_image(bbox, (1,1))
         # shape the output to [B,N,4] to match the multi instance case
         bbox = bbox.unsqueeze(1)
         # get the classifier

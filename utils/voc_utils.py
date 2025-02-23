@@ -1,6 +1,5 @@
 import torch
-from torchvision import tv_tensors
-from torchvision.ops import box_convert
+import numpy as np
 
 # define the voc class to numerical index dict
 voc_class_to_idx = {
@@ -37,9 +36,9 @@ def voc_idx_to_class(labels):
     idx = [class_names_list[int(label) - 1] for label in labels]
     return idx
 
-def parse_target_voc_torch(image, target):
-    '''Parse the VOC target from VOC notation to torch notation.'''
-    torch_target, boxes, labels = {}, [], []
+def parse_target_voc(target):
+    '''Parse the VOC target from VOC dataset, return torch and np'''
+    boxes, labels = [], []
     
     # loop for each detected object:
     for obj in target['annotation']['object']:
@@ -50,22 +49,13 @@ def parse_target_voc_torch(image, target):
         ymax = int(obj['bndbox']['ymax'])
         
         # append the bounding box
-        boxes.append(torch.tensor([xmin, ymin, xmax, ymax], dtype=torch.float32))
+        boxes.append(torch.tensor([xmin, ymin, xmax, ymax], dtype=torch.float32)) 
         # append the label (name)
         labels.append(voc_class_to_idx[obj['name']])    
     
-    # convert to torchvision tensor of type boundingbox
+    # convert to torch
     boxes_tensor = torch.stack(boxes)
+    # convert to np
+    labels = np.array(labels)
     
-    # normalize the tensors and convert to xywh
-    img_w, img_h = image.size
-    # TODO cancelled xywh
-    # boxes_tensor_xywh = box_convert(boxes_tensor, in_fmt = 'xyxy', out_fmt = 'xywh')
-    # boxes_tensor_xywh = boxes_tensor
-    
-    # convert to dict with Tvtensors
-    torch_target['boxes'] = tv_tensors.BoundingBoxes(boxes_tensor, format='xyxy',  # cancelled xywh
-                                                canvas_size=(img_h, img_w), dtype=torch.float32)
-    torch_target['labels'] = torch.tensor(labels, dtype=torch.int64)  # shape: (N,1)
-    
-    return torch_target
+    return boxes_tensor, labels

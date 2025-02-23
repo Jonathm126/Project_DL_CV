@@ -47,23 +47,24 @@ class Trainer:
         self.model.train()
         
         # loop over the data
-        for images, targets in tqdm(self.train_dataloader, desc=f"Training Epoch {epoch_idx+1}"):
+        for images, bboxes, labels  in tqdm(self.train_dataloader, desc=f"Training Epoch {epoch_idx+1}"):
             # organize data
             images = images.to(self.device) # (N, 3, H, W)
-            bboxes = targets['boxes'].to(self.device)  # single tensor (N, 1, 4)
-            labels = targets['labels'].to(self.device)   # single tensor (N, 1)
+            bboxes = bboxes.to(self.device)  # single tensor (N, 1, 4)
+            labels = labels.to(self.device)   # single tensor (N, 1)
             
             # forward pass
-            pred_boxes, pred_labels_logits= self.model(images)
+            pred_boxes, pred_labels_logits = self.model(images)
             
             # compute loss
             bbox_loss = self.bbox_loss_fn(pred_boxes, bboxes)#, reduction = 'mean'
             class_loss = self.class_loss_fn(pred_labels_logits, labels)
-            loss = bbox_loss + class_loss
+            loss =  bbox_loss + class_loss
             
             # backward pass + update
-            self.optimizer.zero_grad()
             loss.backward()
+            self.optimizer.zero_grad()
+            # loss.backward()
             self.optimizer.step()
             
             # compute stats
@@ -77,14 +78,14 @@ class Trainer:
             self.step_idx += 1
 
     def validate_epoch(self, epoch_idx):
-        self.model.eval()
         epoch_bbox_loss, epoch_class_loss, epoch_total_loss, epoch_acc, epoch_iou = 0, 0, 0, 0, 0
         
         with torch.no_grad():
-            for batch_idx, (images, targets) in enumerate(tqdm(self.val_dataloader,  desc=f"Validation Epoch {epoch_idx+1}")):
+            self.model.eval()
+            for batch_idx, (images, bboxes, labels) in enumerate(tqdm(self.val_dataloader,  desc=f"Validation Epoch {epoch_idx+1}")):
                 images = images.to(self.device) # (B, 3, H, W)
-                bboxes = targets['boxes'].to(self.device)  # single tensor (B, N, 4)
-                labels = targets['labels'].to(self.device)   # single tensor (B, N)
+                bboxes = bboxes.to(self.device)  # single tensor (B, N, 4)
+                labels = labels.to(self.device)   # single tensor (B, N)
                 
                 # predict
                 pred_bboxes, pred_labels_logits = self.model(images)
@@ -178,8 +179,10 @@ class Trainer:
             # scan the pre-selected random image indices
             for idx in self.img_idx:
                 # get ground truth
-                img, target = self.val_dataloader.dataset[idx]  
+                img, bboxes, labels  = self.val_dataloader.dataset[idx]  
                 img = img.to(self.device).unsqueeze(0)  # add batch dimension
+                bboxes = bboxes.to(self.device)
+                labels = labels.to(self.device)
                 
                 # run model inference and convert to probabilities
                 pred_bboxes, pred_labels = self.model(img)
@@ -187,10 +190,10 @@ class Trainer:
                 
                 # un-normalize image
                 mean, std = self.model.backbone_transforms().mean, self.model.backbone_transforms().std
-                img = plot_utils.unnormalize(img, mean, std) 
+                img = plot_utils.unnormalize(img, mean, std)
                 
                 # plot bbox of target and prediction with labels
-                img_with_boxes = plot_utils.voc_img_bbox_plot(img.squeeze(0), target["boxes"], target["labels"], pred_bboxes, pred_labels.squeeze(0))
+                img_with_boxes = plot_utils.voc_img_bbox_plot(img.squeeze(0), bboxes, labels, pred_bboxes.squeeze(1), pred_labels.squeeze(1))
                 images_with_boxes.append(img_with_boxes)
             
             # convert to grid row (1 row, N columns)

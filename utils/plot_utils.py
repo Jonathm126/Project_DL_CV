@@ -32,14 +32,16 @@ def plot_images_from_voc_dataset(dataset, num_images=8, title="Dataset Images"):
 
     for i, idx in enumerate(random_indices):
         # Get image and target
-        image, target = dataset[idx]
-        labels = ['Cat' if label == 1 else 'Else' for label in target['labels']]
-        
-        # Convert image and draw bounding boxes
+        image, bboxes, labels = dataset[idx]
+        h, w = image.shape[-2:]
+        # convert labels
+        labels = ['Cat' if label == 1 else 'Else' for label in labels]
+        # unnormalize bbox 
+        unnormalized_bboxes = bboxes * torch.tensor([h, w, h, w], dtype=torch.float32)
+        # unnormalize image and draw bounding boxes
         image_un_norm = unnormalize(image)
-        image_with_boxes = voc_img_bbox_plot(image_un_norm, target['boxes'], labels)
+        image_with_boxes = voc_img_bbox_plot(image_un_norm, unnormalized_bboxes, labels)
         image_with_boxes_PIL = F.to_pil_image(image_with_boxes)
-        
         # Plot the image
         axes[i].imshow(image_with_boxes_PIL)
         axes[i].axis("off")
@@ -49,7 +51,6 @@ def plot_images_from_voc_dataset(dataset, num_images=8, title="Dataset Images"):
     plt.tight_layout()
     plt.show()
 
-# helper for transforming voc bbox to PIL
 def voc_img_bbox_plot(image, boxes1, labels1, boxes2 = None, labels2 = None):
     '''Helper function to plot bounding boxes on a SINGLE image, given labels and boxes.
         Input:
