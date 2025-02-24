@@ -29,30 +29,30 @@ class SoSiDetectionModel(torch.nn.Module):
         self.final_head_conv_depth = final_head_conv_depth
         
         # predict 4 bbox coordinates
-        # self.bbox_head = nn.Sequential(
-        #     nn.Conv2d(self.backbone_out_channels, self.final_head_conv_depth, kernel_size=3, padding=1),
-        #     nn.BatchNorm2d(self.final_head_conv_depth),
-        #     nn.ReLU(),
-        #     # nn.AdaptiveAvgPool2d(1),  # testing
-        #     nn.Flatten(),  
-        #     nn.Linear(self.final_head_conv_depth * (self.backbone_out_w ** 2), 64),
-        #     nn.ReLU(),
-        #     nn.Linear(64, 4),
-        #     # add sigmoid since the output is normalized TODO is this good?
-        #     nn.Sigmoid()
-        # )
-        
         self.bbox_head = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(self.backbone_out_channels * (self.backbone_out_w ** 2), 128),
+            nn.Conv2d(self.backbone_out_channels, self.final_head_conv_depth, kernel_size=3, padding=1),
+            nn.BatchNorm2d(self.final_head_conv_depth),
             nn.ReLU(),
-            nn.Linear(128, 64),
+            # nn.AdaptiveAvgPool2d(1),  # testing
+            nn.Flatten(),  
+            nn.Linear(self.final_head_conv_depth * (self.backbone_out_w ** 2), 64),
             nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, 4),
+            nn.Linear(64, 4),
+            # add sigmoid since the output is normalized TODO is this good?
             nn.Sigmoid()
         )
+        
+        # self.bbox_head = nn.Sequential(
+        #     nn.Flatten(),
+        #     nn.Linear(self.backbone_out_channels * (self.backbone_out_w ** 2), 128),
+        #     nn.ReLU(),
+        #     nn.Linear(128, 64),
+        #     nn.ReLU(),
+        #     nn.Linear(64, 32),
+        #     nn.ReLU(),
+        #     nn.Linear(32, 4),
+        #     nn.Sigmoid()
+        # )
         
         # predict object presence
         self.class_head = nn.Sequential(

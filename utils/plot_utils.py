@@ -33,14 +33,11 @@ def plot_images_from_voc_dataset(dataset, num_images=8, title="Dataset Images"):
     for i, idx in enumerate(random_indices):
         # Get image and target
         image, bboxes, labels = dataset[idx]
-        h, w = image.shape[-2:]
         # convert labels
         labels = ['Cat' if label == 1 else 'Else' for label in labels]
-        # unnormalize bbox 
-        unnormalized_bboxes = bboxes * torch.tensor([h, w, h, w], dtype=torch.float32)
         # unnormalize image and draw bounding boxes
         image_un_norm = unnormalize(image)
-        image_with_boxes = voc_img_bbox_plot(image_un_norm, unnormalized_bboxes, labels)
+        image_with_boxes = voc_img_bbox_plot(image_un_norm, bboxes, labels)
         image_with_boxes_PIL = F.to_pil_image(image_with_boxes)
         # Plot the image
         axes[i].imshow(image_with_boxes_PIL)
@@ -61,7 +58,9 @@ def voc_img_bbox_plot(image, boxes1, labels1, boxes2 = None, labels2 = None):
     '''
     # convert iamge to uint8
     image_uint8 = (image * 255).to(torch.uint8) 
-    
+    h, w = image.shape[-2:]
+    # unnormalize bbox 
+    boxes1 = boxes1 * torch.tensor([h, w, h, w], dtype=torch.float32, device = boxes1.device)
     # convert labels to a list of strings only if they are a tensor
     if isinstance(labels1, torch.Tensor):
         labels1 = [str(label.item()) for label in labels1] 
@@ -73,6 +72,8 @@ def voc_img_bbox_plot(image, boxes1, labels1, boxes2 = None, labels2 = None):
         image_with_boxes = image_uint8
     # handle target2 if present
     if boxes2 is not None:
+        # unnormalize bbox 
+        boxes2 = boxes2 * torch.tensor([h, w, h, w], dtype=torch.float32, device=boxes2.device)
         # process labels
         if isinstance(labels2, torch.Tensor):
             labels2 = [str(label.item()) for label in labels2] 

@@ -59,12 +59,11 @@ class Trainer:
             # compute loss
             bbox_loss = self.bbox_loss_fn(pred_boxes, bboxes)#, reduction = 'mean'
             class_loss = self.class_loss_fn(pred_labels_logits, labels)
-            loss =  bbox_loss + class_loss
+            loss =  10 * bbox_loss + class_loss
             
             # backward pass + update
-            loss.backward()
             self.optimizer.zero_grad()
-            # loss.backward()
+            loss.backward()
             self.optimizer.step()
             
             # compute stats
