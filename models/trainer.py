@@ -2,7 +2,7 @@
 import torch
 import random
 from torchvision.utils import make_grid
-from torchvision.ops import box_iou
+from torchvision.ops import box_iou, box_convert
 
 # visualizer
 from tqdm import tqdm
@@ -59,7 +59,7 @@ class Trainer:
             # compute loss
             bbox_loss = self.bbox_loss_fn(pred_boxes, bboxes)#, reduction = 'mean'
             class_loss = self.class_loss_fn(pred_labels_logits, labels)
-            loss =  10 * bbox_loss + class_loss
+            loss =  bbox_loss + class_loss
             
             # backward pass + update
             self.optimizer.zero_grad()
@@ -73,7 +73,8 @@ class Trainer:
             # Log losses to TensorBoard
             self.writer.add_scalars("Train/Loss", {"BoundingBox": bbox_loss.item() ,"Classification": class_loss.item(), "Total": loss.item()}, self.step_idx)
             self.writer.add_scalars("Train/Stats", {"Acc" : batch_acc, "IoU" : batch_iou}, self.step_idx)
-            self.writer.add_scalar("Train/Lr", self.scheduler.get_last_lr()[0], self.step_idx)
+            if self.scheduler is not None:
+                self.writer.add_scalar("Train/Lr", self.scheduler.get_last_lr()[0], self.step_idx)
             self.step_idx += 1
 
     def validate_epoch(self, epoch_idx):
@@ -166,7 +167,9 @@ class Trainer:
         accuracy = predicted / len(labels)
 
         # compute IoU
-        iou_matrix = box_iou(pred_boxes.view(-1, 4), boxes.view(-1, 4))  # Shape: (batch_size, batch_size)
+        # cast to xyxy
+        iou_matrix = box_iou(box_convert(pred_boxes.view(-1, 4), 'xywh', 'xyxy'),
+                            box_convert(boxes.view(-1, 4), 'xywh', 'xyxy'))
         batch_iou = iou_matrix.diag()  # Get the IoU of each bbox with itself
         mean_iou = batch_iou.mean().item()  # Compute batch mean IoU
         

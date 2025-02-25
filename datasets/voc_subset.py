@@ -1,6 +1,6 @@
 # import torch
 from torchvision.datasets import VOCDetection
-from torchvision.ops import box_area
+from torchvision.ops import box_area, box_convert
 from torchvision.tv_tensors import BoundingBoxes
 import torch
 
@@ -46,24 +46,33 @@ class VOCSubset(VOCDetection):
         '''returns image, bbox, label'''
         # get the real image index from the selected indices
         image_idx = self.selected_indices[idx]
+        
         # fetch the image using the saved index
         image, target = super().__getitem__(image_idx)  
         w, h = image.size[0:2]
+        
         # convert the object to torch notation
         bboxes, labels = voc_utils.parse_target_voc(target)
+        
         # filter the result according to the single class \ single instance option
         bboxes, labels = self.single_instance_and_filter(bboxes, labels)
+        
         # prepare for transformation
         bboxes = BoundingBoxes(bboxes, format = 'xyxy', canvas_size = (h, w), dtype = torch.float32)
         target_dict = {'bboxes': bboxes, 'labels': labels}
+        
         # call the transform after parsing the target
         image_transformed, transformed_target_dict = self.both_transform(image, target_dict)
+        
         # normalize bbox back to canvas size
         canvas_size = torch.tensor(transformed_target_dict['bboxes'].canvas_size)
         bboxes = transformed_target_dict['bboxes'] / torch.cat((canvas_size, canvas_size), dim=0)
-        # wrap again in Tvtensor boundingbox and in tensor
-        bboxes = BoundingBoxes(bboxes, format='xyxy', canvas_size = canvas_size, dtype = torch.float32)
+        
+        # transform to xywh, wrap again in Tvtensor boundingbox and in tensor
+        bboxes = box_convert(bboxes, 'xyxy', 'xywh')
+        bboxes = BoundingBoxes(bboxes, format='xywh', canvas_size = canvas_size, dtype = torch.float32)
         labels = torch.tensor(transformed_target_dict['labels'], dtype = torch.float16)
+        
         return image_transformed, bboxes, labels
     
     def single_instance_and_filter(self, bboxes, labels):

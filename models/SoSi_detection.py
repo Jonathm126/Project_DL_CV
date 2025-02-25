@@ -31,11 +31,13 @@ class SoSiDetectionModel(torch.nn.Module):
         # predict 4 bbox coordinates
         self.bbox_head = nn.Sequential(
             nn.Conv2d(self.backbone_out_channels, self.final_head_conv_depth, kernel_size=3, padding=1),
-            nn.BatchNorm2d(self.final_head_conv_depth),
+            # nn.BatchNorm2d(self.final_head_conv_depth),
             nn.ReLU(),
             # nn.AdaptiveAvgPool2d(1),  # testing
             nn.Flatten(),  
-            nn.Linear(self.final_head_conv_depth * (self.backbone_out_w ** 2), 64),
+            nn.Linear(self.final_head_conv_depth * (self.backbone_out_w ** 2), 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, 4),
             # add sigmoid since the output is normalized TODO is this good?
