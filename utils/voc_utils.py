@@ -1,4 +1,5 @@
 import torch
+from torchvision.tv_tensors import BoundingBoxes
 import numpy as np
 
 # define the voc class to numerical index dict
@@ -36,9 +37,10 @@ def voc_idx_to_class(labels):
     idx = [class_names_list[int(label) - 1] for label in labels]
     return idx
 
-def parse_target_voc(target):
+def parse_target_voc(img_shape, target):
     '''Parse the VOC target from VOC dataset, return torch and np'''
     boxes, labels = [], []
+    w, h = img_shape
     
     # loop for each detected object:
     for obj in target['annotation']['object']:
@@ -54,8 +56,7 @@ def parse_target_voc(target):
         labels.append(voc_class_to_idx[obj['name']])    
     
     # convert to torch
-    boxes_tensor = torch.stack(boxes)
-    # convert to np
-    labels = np.array(labels)
+    bboxes = BoundingBoxes(torch.stack(boxes), format = 'xyxy', canvas_size = (h, w), dtype = torch.float32)
+    labels = torch.tensor(labels, dtype = torch.float16)
     
-    return boxes_tensor, labels
+    return {'bboxes': bboxes, 'labels': labels}

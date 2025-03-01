@@ -30,6 +30,7 @@ class Trainer:
         self.val_dataloader = val_dataloader
         self.optimizer = optimizer
         self.scheduler = lr_scheduler
+        self.epoch = 0
         self.stopping_patience = stopping_patience
         
         # train step counter
@@ -126,16 +127,17 @@ class Trainer:
             self.img_idx = random.sample(range(len(self.val_dataloader.dataset)), k=img_plot_qty)
         
         # start epochs run
-        for epoch_idx in range(max_epochs):
+        for epoch in range(self.epoch, self.epoch + max_epochs):
             # train
-            self.train_epoch(epoch_idx)
+            self.epoch = epoch
+            self.train_epoch(self.epoch)
             
             # validate
-            val_loss = self.validate_epoch(epoch_idx)
+            val_loss = self.validate_epoch(self.epoch)
             
             # log image results if not None
-            if epoch_idx % log_images_every == 0 and log_images_every is not None:
-                self.tb_log_voc_images(epoch_idx)
+            if self.epoch % log_images_every == 0 and log_images_every is not None:
+                self.tb_log_voc_images(self.epoch)
             
             # lr scheduler
             if self.scheduler is not None:
@@ -154,7 +156,7 @@ class Trainer:
                         break
         
         # log last image grid and return
-        return self.tb_log_voc_images(epoch_idx)
+        return self.tb_log_voc_images(self.epoch)
     
     def compute_predictions(self, logits_labels):
         '''converts the logits to label predictions'''
@@ -195,7 +197,7 @@ class Trainer:
                 img = plot_utils.unnormalize(img, mean, std)
                 
                 # plot bbox of target and prediction with labels
-                img_with_boxes = plot_utils.voc_img_bbox_plot(img.squeeze(0), bboxes, labels, pred_bboxes.squeeze(1), pred_labels.squeeze(1))
+                img_with_boxes = plot_utils.voc_img_bbox_plot(img.squeeze(0), bboxes, labels, pred_bboxes.squeeze(0), pred_labels.squeeze(1))
                 images_with_boxes.append(img_with_boxes)
             
             # convert to grid row (1 row, N columns)

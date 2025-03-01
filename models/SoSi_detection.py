@@ -30,17 +30,33 @@ class SoSiDetectionModel(torch.nn.Module):
         
         # predict 4 bbox coordinates
         self.bbox_head = nn.Sequential(
-            nn.Conv2d(self.backbone_out_channels, self.final_head_conv_depth, kernel_size=3, padding=1),
+            # 1st conv
+            nn.Conv2d(self.backbone_out_channels, 128, kernel_size=2, stride=1, padding=1), # output 7X7
+            nn.ReLU(),
+            # nn.BatchNorm2d(128),
+            nn.Dropout(0.3),
+            # nn.AdaptiveAvgPool2d(1),
+            # 2nd conv
+            # nn.Conv2d(128, self.final_head_conv_depth, kernel_size=3, stride=1, padding=1), # output 3X3
+            # nn.ReLU(),
             # nn.BatchNorm2d(self.final_head_conv_depth),
-            nn.ReLU(),
-            # nn.AdaptiveAvgPool2d(1),  # testing
+            # nn.Dropout(0.3),
+            
+            # start fc layer
             nn.Flatten(),  
-            nn.Linear(self.final_head_conv_depth * (self.backbone_out_w ** 2), 128),
+            
+            # 1st fc
+            nn.Linear(self.final_head_conv_depth * ((self.backbone_out_w) ** 2), 128),
             nn.ReLU(),
+            nn.Dropout(0.2),
+            # 2nd fc
             nn.Linear(128, 64),
             nn.ReLU(),
+            nn.Dropout(0.2),
+            # final fc
             nn.Linear(64, 4),
-            # add sigmoid since the output is normalized TODO is this good?
+            
+            # add sigmoid since the output is normalized
             nn.Sigmoid()
         )
         
@@ -60,6 +76,7 @@ class SoSiDetectionModel(torch.nn.Module):
         self.class_head = nn.Sequential(
             nn.Conv2d(self.backbone_out_channels, self.final_head_conv_depth, kernel_size=3, padding=1),
             nn.ReLU(),
+            nn.Dropout(),
             nn.AdaptiveAvgPool2d(1),  
             nn.Flatten(),  
             nn.Linear(self.final_head_conv_depth, 1)

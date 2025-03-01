@@ -5,7 +5,7 @@ from torchvision.tv_tensors import BoundingBoxes
 import torch
 
 # my imports
-from config import config
+from datasets.config import dataset_path
 import utils.voc_utils as voc_utils
 
 # define a class that is the subset of the VOC dataset, with the selected class
@@ -18,7 +18,7 @@ class VOCSubset(VOCDetection):
                 - transforms: a transformation function for BOTH the image and the target
         '''
         # init the dataset
-        super().__init__(root=config.dataset_path,
+        super().__init__(root=dataset_path,
                         year="2012",
                         image_set='trainval',
                         download = download,
@@ -48,32 +48,26 @@ class VOCSubset(VOCDetection):
         image_idx = self.selected_indices[idx]
         
         # fetch the image using the saved index
-        image, target = super().__getitem__(image_idx)  
-        w, h = image.size[0:2]
+        image, target = super().__getitem__(image_idx)
         
         # convert the object to torch notation
-        bboxes, labels = voc_utils.parse_target_voc(target)
+        torch_target = voc_utils.parse_target_voc(image.size[0:2], target)
+        
+        # call the transform
+        image_transformed, transformed_target_dict = self.both_transform(image, torch_target)
+        
+        # normalize bbox to (0,1) according to canvas size
+        canvas_size = torch.tensor(transformed_target_dict['bboxes'].canvas_size)
+        bboxes_norm = transformed_target_dict['bboxes'] / torch.cat((canvas_size, canvas_size), dim=0)
         
         # filter the result according to the single class \ single instance option
-        bboxes, labels = self.single_instance_and_filter(bboxes, labels)
-        
-        # prepare for transformation
-        bboxes = BoundingBoxes(bboxes, format = 'xyxy', canvas_size = (h, w), dtype = torch.float32)
-        target_dict = {'bboxes': bboxes, 'labels': labels}
-        
-        # call the transform after parsing the target
-        image_transformed, transformed_target_dict = self.both_transform(image, target_dict)
-        
-        # normalize bbox back to canvas size
-        canvas_size = torch.tensor(transformed_target_dict['bboxes'].canvas_size)
-        bboxes = transformed_target_dict['bboxes'] / torch.cat((canvas_size, canvas_size), dim=0)
+        bboxes_clean, labels_clean = self.single_instance_and_filter(bboxes_norm, transformed_target_dict['labels'])
         
         # transform to xywh, wrap again in Tvtensor boundingbox and in tensor
-        bboxes = box_convert(bboxes, 'xyxy', 'xywh')
-        bboxes = BoundingBoxes(bboxes, format='xywh', canvas_size = canvas_size, dtype = torch.float32)
-        labels = torch.tensor(transformed_target_dict['labels'], dtype = torch.float16)
+        bboxes_clean_xywh = box_convert(bboxes_clean, 'xyxy', 'xywh')
+        bboxes_clean_xywh = BoundingBoxes(bboxes_clean_xywh, format='xywh', canvas_size = canvas_size, dtype = torch.float32)
         
-        return image_transformed, bboxes, labels
+        return image_transformed, bboxes_clean_xywh, labels_clean
     
     def single_instance_and_filter(self, bboxes, labels):
         '''filters annotations per frame based on the following rules:
@@ -88,10 +82,11 @@ class VOCSubset(VOCDetection):
             if mask.sum() > 0:
                 # If selected object is in the frame, keep only those objects
                 bboxes = bboxes[mask]
-                labels = [1] * len(labels[mask])  # Set labels to 1 for selected objects
+                labels = torch.ones_like(labels[mask], dtype=torch.float16)
             else:
-                # If the selected object is NOT in the frame, keep all objects but set labels to 0
-                labels = [0] * len(labels)  # Set all labels to 0
+                # If the selected object is NOT in the frame
+                labels = torch.zeros_like(labels, dtype = torch.float16)  # Set all labels to 0
+                # bboxes = torch.tensor([[0, 0, 0.001, 0.001]]).repeat(len(labels), 1) # set bboxes to xyxy = 0,0,.01,.01
         
         # if single instance per image:
         if self.single_instance:
