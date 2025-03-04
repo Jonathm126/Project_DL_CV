@@ -31,11 +31,12 @@ class SoSiDetectionModel(torch.nn.Module):
         # predict 4 bbox coordinates
         self.bbox_head = nn.Sequential(
             # 1st conv
-            nn.Conv2d(self.backbone_out_channels, 128, kernel_size=2, stride=1, padding=1), # output 7X7
+            nn.Conv2d(self.backbone_out_channels, 128, kernel_size=2, stride=1, padding=1), # output 8X8
             nn.ReLU(),
-            # nn.BatchNorm2d(128),
+            nn.BatchNorm2d(128),
             nn.Dropout(0.3),
             # nn.AdaptiveAvgPool2d(1),
+            
             # 2nd conv
             # nn.Conv2d(128, self.final_head_conv_depth, kernel_size=3, stride=1, padding=1), # output 3X3
             # nn.ReLU(),
@@ -46,7 +47,7 @@ class SoSiDetectionModel(torch.nn.Module):
             nn.Flatten(),  
             
             # 1st fc
-            nn.Linear(self.final_head_conv_depth * ((self.backbone_out_w) ** 2), 128),
+            nn.Linear(self.final_head_conv_depth * ((self.backbone_out_w + 1) ** 2), 128),
             nn.ReLU(),
             nn.Dropout(0.2),
             # 2nd fc
