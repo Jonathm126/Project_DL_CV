@@ -97,3 +97,56 @@ def voc_img_bbox_plot(image, boxes1, labels1, boxes2=None, labels2=None):
         image_with_boxes = plot_single_box(image_with_boxes, boxes2, labels2, "blue")
     
     return image_with_boxes
+
+
+def inverse_transform_bbox(bboxes: torch.Tensor, original_size, resize_size, crop_size):
+    """
+    Inverts the Resize and CenterCrop transforms on a tensor of bounding boxes with shape [B, N, 4].
+
+    Args:
+        bboxes (torch.Tensor): Tensor of shape [B, N, 4] with bounding boxes in cropped coordinates,
+                               where each bbox is [x_min, y_min, x_max, y_max].
+        original_size (tuple): Original image dimensions as (orig_h, orig_w).
+        resize_size (tuple): Size used in T.Resize, e.g., (R_h, R_w).
+        crop_size (int or tuple): Size used in T.CenterCrop. If int, assumes a square crop.
+
+    Returns:
+        torch.Tensor: Bounding boxes in original image coordinates with shape [B, N, 4].
+    """
+    # Ensure crop_size is a tuple (crop_h, crop_w)
+    if isinstance(crop_size, int):
+        crop_h, crop_w = crop_size, crop_size
+    else:
+        crop_h, crop_w = crop_size
+
+    R_h, R_w = resize_size
+    orig_h, orig_w = original_size
+
+    # Compute center crop offsets.
+    offset_x = (R_w - crop_w) // 2
+    offset_y = (R_h - crop_h) // 2
+
+    # Create an offsets tensor with shape [1, 1, 4] for broadcasting.
+    offsets = torch.tensor([offset_x, offset_y, offset_x, offset_y],
+                             dtype=bboxes.dtype, device=bboxes.device).view(1, 1, 4)
+    
+    # Reverse the cropping by adding the offsets.
+    bboxes_resized = bboxes + offsets
+
+    # Compute scaling factors to reverse the resize.
+    scale_x = orig_w / R_w
+    scale_y = orig_h / R_h
+
+    # Create a scales tensor with shape [1, 1, 4] for broadcasting.
+    scales = torch.tensor([scale_x, scale_y, scale_x, scale_y],
+                          dtype=bboxes.dtype, device=bboxes.device).view(1, 1, 4)
+    
+    # Apply scaling to map the bounding boxes back to the original image coordinates.
+    bboxes_original = bboxes_resized * scales
+
+    # Optionally, if you want integer coordinates, you can round them:
+    bboxes_original = bboxes_original.round()
+    # To convert to integer tensor, uncomment the following line:
+    # bboxes_original = bboxes_original.to(torch.int)
+
+    return bboxes_original
