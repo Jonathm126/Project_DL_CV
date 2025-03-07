@@ -99,54 +99,51 @@ def voc_img_bbox_plot(image, boxes1, labels1, boxes2=None, labels2=None):
     return image_with_boxes
 
 
-def inverse_transform_bbox(bboxes: torch.Tensor, original_size, resize_size, crop_size):
+def bboxes_crop_to_original_xyxy(bboxes: torch.Tensor, W: float, H: float) -> torch.Tensor:
     """
-    Inverts the Resize and CenterCrop transforms on a tensor of bounding boxes with shape [B, N, 4].
+    Converts bounding boxes from normalized crop coordinates (xywh) to original image coordinates (xyxy).
 
     Args:
-        bboxes (torch.Tensor): Tensor of shape [B, N, 4] with bounding boxes in cropped coordinates,
-                               where each bbox is [x_min, y_min, x_max, y_max].
-        original_size (tuple): Original image dimensions as (orig_h, orig_w).
-        resize_size (tuple): Size used in T.Resize, e.g., (R_h, R_w).
-        crop_size (int or tuple): Size used in T.CenterCrop. If int, assumes a square crop.
+        bboxes (torch.Tensor): Tensor of shape [N, 4] containing normalized bounding boxes in (x, y, w, h) format.
+                                Values are in range [0, 1] relative to the 224x224 crop.
+        W (float): Original image width.
+        H (float): Original image height.
 
     Returns:
-        torch.Tensor: Bounding boxes in original image coordinates with shape [B, N, 4].
+        torch.Tensor: Tensor of shape [N, 4] with bounding boxes in the original image coordinate system in (x_min, y_min, x_max, y_max) format.
     """
-    # Ensure crop_size is a tuple (crop_h, crop_w)
-    if isinstance(crop_size, int):
-        crop_h, crop_w = crop_size, crop_size
-    else:
-        crop_h, crop_w = crop_size
-
-    R_h, R_w = resize_size
-    orig_h, orig_w = original_size
-
-    # Compute center crop offsets.
-    offset_x = (R_w - crop_w) // 2
-    offset_y = (R_h - crop_h) // 2
-
-    # Create an offsets tensor with shape [1, 1, 4] for broadcasting.
-    offsets = torch.tensor([offset_x, offset_y, offset_x, offset_y],
-                             dtype=bboxes.dtype, device=bboxes.device).view(1, 1, 4)
+    # Compute the scale factor used during resize.
+    # The shorter side is resized to 232.
+    s = 232.0 / min(W, H)
     
-    # Reverse the cropping by adding the offsets.
-    bboxes_resized = bboxes + offsets
-
-    # Compute scaling factors to reverse the resize.
-    scale_x = orig_w / R_w
-    scale_y = orig_h / R_h
-
-    # Create a scales tensor with shape [1, 1, 4] for broadcasting.
-    scales = torch.tensor([scale_x, scale_y, scale_x, scale_y],
-                          dtype=bboxes.dtype, device=bboxes.device).view(1, 1, 4)
+    # Dimensions of the resized image.
+    resized_W = W * s
+    resized_H = H * s
     
-    # Apply scaling to map the bounding boxes back to the original image coordinates.
-    bboxes_original = bboxes_resized * scales
+    # Compute the center crop offsets for a 224x224 crop.
+    offset_x = (resized_W - 224) / 2.0
+    offset_y = (resized_H - 224) / 2.0
 
-    # Optionally, if you want integer coordinates, you can round them:
-    bboxes_original = bboxes_original.round()
-    # To convert to integer tensor, uncomment the following line:
-    # bboxes_original = bboxes_original.to(torch.int)
+    # Convert normalized crop coordinates to pixel coordinates in the crop (shape: [N, 4]).
+    # Multiply by 224 since the crop size is 224x224.
+    x_crop = bboxes[:, 0] * 224.0
+    y_crop = bboxes[:, 1] * 224.0
+    w_crop = bboxes[:, 2] * 224.0
+    h_crop = bboxes[:, 3] * 224.0
 
-    return bboxes_original
+    # Map from crop coordinates to resized image coordinates by adding the crop offset.
+    x_resized = offset_x + x_crop
+    y_resized = offset_y + y_crop
+
+    # Scale back from the resized image to the original image dimensions.
+    x_original = x_resized / s
+    y_original = y_resized / s
+    w_original = w_crop / s
+    h_original = h_crop / s
+
+    # Stack the coordinates into a tensor with format [N, 4] in xywh format.
+    boxes_xywh = torch.stack([x_original, y_original, w_original, h_original], dim=1)
+        
+    return boxes_xywh
+
+
