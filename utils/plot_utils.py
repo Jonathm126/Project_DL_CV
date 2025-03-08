@@ -99,7 +99,7 @@ def voc_img_bbox_plot(image, boxes1, labels1, boxes2=None, labels2=None):
     return image_with_boxes
 
 
-def bboxes_crop_to_original_xyxy(bboxes: torch.Tensor, W: float, H: float) -> torch.Tensor:
+def inverse_transform_bbox(bboxes: torch.Tensor, W: float, H: float) -> torch.Tensor:
     """
     Converts bounding boxes from normalized crop coordinates (xywh) to original image coordinates (xyxy).
 
@@ -110,7 +110,7 @@ def bboxes_crop_to_original_xyxy(bboxes: torch.Tensor, W: float, H: float) -> to
         H (float): Original image height.
 
     Returns:
-        torch.Tensor: Tensor of shape [N, 4] with bounding boxes in the original image coordinate system in (x_min, y_min, x_max, y_max) format.
+        torch.Tensor: Tensor of shape [N, 4] with bounding boxes in the original image coordinate system in (xyxy) format.
     """
     # Compute the scale factor used during resize.
     # The shorter side is resized to 232.
@@ -126,10 +126,10 @@ def bboxes_crop_to_original_xyxy(bboxes: torch.Tensor, W: float, H: float) -> to
 
     # Convert normalized crop coordinates to pixel coordinates in the crop (shape: [N, 4]).
     # Multiply by 224 since the crop size is 224x224.
-    x_crop = bboxes[:, 0] * 224.0
-    y_crop = bboxes[:, 1] * 224.0
-    w_crop = bboxes[:, 2] * 224.0
-    h_crop = bboxes[:, 3] * 224.0
+    x_crop = bboxes[..., 0] * 224.0
+    y_crop = bboxes[..., 1] * 224.0
+    w_crop = bboxes[..., 2] * 224.0
+    h_crop = bboxes[..., 3] * 224.0
 
     # Map from crop coordinates to resized image coordinates by adding the crop offset.
     x_resized = offset_x + x_crop
@@ -140,10 +140,13 @@ def bboxes_crop_to_original_xyxy(bboxes: torch.Tensor, W: float, H: float) -> to
     y_original = y_resized / s
     w_original = w_crop / s
     h_original = h_crop / s
+    
+    # Convert from (x, y, w, h) to (x_min, y_min, x_max, y_max)
+    x_max = x_original + w_original
+    y_max = y_original + h_original
 
-    # Stack the coordinates into a tensor with format [N, 4] in xywh format.
-    boxes_xywh = torch.stack([x_original, y_original, w_original, h_original], dim=1)
+    boxes_xyxy = torch.stack([x_original, y_original, x_max, y_max], dim=-1)
         
-    return boxes_xywh
+    return boxes_xyxy
 
 
