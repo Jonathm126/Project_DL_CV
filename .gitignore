@@ -160,7 +160,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 inference/cats_wild_p02_model_Mar-02_19-52-20.mp4
-/inference
 inference/cats_wild_p02_model_Mar-02_19-52-20.mp4
 inference/cats_wild_p02_model_Mar-02_20-47-57.mp4
 inference/cats_wild_p02_model_Mar-02_21-42-15.mp4
