@@ -1,0 +1,3 @@
+Mar-09_18-15-05 good result using MSE K=1
+Mar-09_19-30-47 smooth L1 and K=4
+Mar-09_20-09-10 ciou and k=4

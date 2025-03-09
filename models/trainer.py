@@ -57,8 +57,21 @@ class Trainer:
             # forward pass
             pred_boxes, pred_labels_logits = self.model(images)
             
+            # if it's a single object dataset
+            if self.mask_single_object:
+                # mask for images with the selected class
+                mask = (labels.squeeze() == 1)
+                
+                # compute bbox loss only for the selected label
+                if mask.sum() > 0:
+                    bbox_loss = self.bbox_loss_fn(pred_boxes[mask].view(-1,4), bboxes[mask].view(-1,4))
+                else:
+                    bbox_loss = torch.tensor(0.0, device=self.device)
+            else:
+                # refer to all objects
+                bbox_loss = self.bbox_loss_fn(pred_boxes, bboxes)
+            
             # compute loss
-            bbox_loss = self.bbox_loss_fn(pred_boxes, bboxes)#, reduction = 'mean'
             class_loss = self.class_loss_fn(pred_labels_logits, labels)
             loss =  bbox_loss + class_loss
             
@@ -69,13 +82,21 @@ class Trainer:
             
             # compute stats
             pred_labels = self.compute_predictions(pred_labels_logits)
-            batch_acc, batch_iou = self.compute_batch_stats(pred_labels, labels, pred_boxes, bboxes)
+            batch_acc, batch_iou = self.compute_batch_stats(pred_labels, labels, pred_boxes, bboxes, mask)
             
             # Log losses to TensorBoard
-            self.writer.add_scalars("Train/Loss", {"BoundingBox": bbox_loss.item() ,"Classification": class_loss.item(), "Total": loss.item()}, self.step_idx)
-            self.writer.add_scalars("Train/Stats", {"Acc" : batch_acc, "IoU" : batch_iou}, self.step_idx)
-            if self.scheduler is not None:
-                self.writer.add_scalar("Train/Lr", self.scheduler.get_last_lr()[0], self.step_idx)
+            self.writer.add_scalars("Train/Loss", {
+                "BoundingBox": bbox_loss.item(),
+                "Classification": class_loss.item(),
+                "Total": loss.item()
+            }, self.step_idx)
+            
+            self.writer.add_scalars("Train/Stats", {
+                "Acc": batch_acc,
+                "IoU": batch_iou
+            }, self.step_idx)
+            self.writer.add_scalar("Train/Lr", self.scheduler.get_last_lr()[0], self.step_idx)
+            
             self.step_idx += 1
 
     def validate_epoch(self, epoch_idx):
@@ -101,8 +122,11 @@ class Trainer:
                 epoch_total_loss += loss.item()
                 
                 # compute stats
+                if self.mask_single_object:
+                # mask for images with the selected class
+                    mask = (labels.squeeze() == 1)
                 pred_labels = self.compute_predictions(pred_labels_logits)
-                batch_acc, batch_iou = self.compute_batch_stats(pred_labels, labels, pred_bboxes, bboxes)
+                batch_acc, batch_iou = self.compute_batch_stats(pred_labels, labels, pred_bboxes, bboxes, mask)
                 
                 epoch_acc += batch_acc
                 epoch_iou += batch_iou
@@ -117,7 +141,9 @@ class Trainer:
         
         return epoch_total_loss
 
-    def train(self, max_epochs, log_images_every = None, img_plot_qty = 12):
+    def train(self, max_epochs, log_images_every = None, img_plot_qty = 12, mask_single_object = False):
+        self.mask_single_object = mask_single_object
+        
         # early stopping
         best_loss, counter = float('inf'), 0
         
@@ -162,18 +188,26 @@ class Trainer:
         '''converts the logits to label predictions'''
         return (torch.sigmoid(logits_labels) > 0.5).float() if logits_labels.shape[1] == 1 else logits_labels.argmax(1)
     
-    def compute_batch_stats(self, pred_labels, labels, pred_boxes, boxes):
+    def compute_batch_stats(self, pred_labels, labels, pred_boxes, boxes, mask = None):
         '''computes accuracy and IoU for a batch.'''
+        
+        # if we compute only for the mask
+        if mask is not None:
+            pred_boxes = pred_boxes[mask]
+            boxes = boxes[mask]
+        
         # compute accuracy
         predicted = (pred_labels == labels).float().sum().item()
         accuracy = predicted / len(labels)
 
         # compute IoU
         # cast to xyxy
-        iou_matrix = box_iou(box_convert(pred_boxes.view(-1, 4), 'xywh', 'xyxy'),
-                            box_convert(boxes.view(-1, 4), 'xywh', 'xyxy'))
+        iou_matrix = box_iou(
+            box_convert(pred_boxes.view(-1, 4), 'xywh', 'xyxy'),
+            box_convert(boxes.view(-1, 4), 'xywh', 'xyxy')
+        )
         batch_iou = iou_matrix.diag()  # Get the IoU of each bbox with itself
-        mean_iou = batch_iou.mean().item()  # Compute batch mean IoU
+        mean_iou = batch_iou.mean().item() if len(batch_iou) > 0 else 0.0
         
         return accuracy, mean_iou
     
