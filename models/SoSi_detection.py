@@ -2,7 +2,6 @@
 import torch
 import torch.nn as nn
 from torchvision.models import MobileNet_V3_Large_Weights, mobilenet_v3_large
-from torchvision.ops import clip_boxes_to_image
 
 # a custom class for the object detector module
 class SoSiDetectionModel(torch.nn.Module):
