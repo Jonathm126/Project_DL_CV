@@ -72,7 +72,7 @@ def plot_single_box(image, boxes, labels, color):
     
     try:  # Handle cases of illegal bbox
         image = torchvision.utils.draw_bounding_boxes(image, boxes, fill=False, colors=color, width=3, 
-                                                    labels=labels, font_size=25, font='verdana.ttf')
+                                                    labels=labels, font_size=25)
     except Exception:
         pass
     
