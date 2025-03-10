@@ -7,9 +7,7 @@ import time
 import os
 import sys
 
-# tb open
-logname = 'Feb-21_22-21-24'
-log_dir =os.path.join(os.getcwd(),'models', 'model_logs', 'p_02',logname)
+
 
 # tb launch
 port = 6008

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Part 2 - Single Object, Single Instance</title>
+  <!-- Import a modern Google Font -->
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Roboto', sans-serif;
+      background-color: #f5f5f5;
+      color: #333;
+      margin: 2rem;
+    }
+    h1 {
+      text-align: center;
+      font-size: 2.5rem;
+      margin-bottom: 2rem;
+      color: #2c3e50;
+    }
+    .video-container {
+      max-width: 800px;
+      margin: 0 auto 2rem auto;
+      background-color: #fff;
+      border-radius: 8px;
+      padding: 1rem;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+    video {
+      width: 100%;
+      border-radius: 4px;
+    }
+    .caption {
+      text-align: center;
+      font-size: 1.2rem;
+      margin-top: 0.5rem;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <h1>Part 2 - Single Object, Single Instance</h1>
+  
+  <div class="video-container">
+    <video controls>
+      <source src="inference/cats_wild_p02_model_Mar-09_18-15-05.mp4" type="video/mp4">
+      Your browser does not support the video tag.
+    </video>
+    <div class="caption">Wild Cats Video</div>
+  </div>
+  
+  <div class="video-container">
+    <video controls>
+      <source src="inference/cats_forest_p02_model_Mar-09_18-15-05.mp4" type="video/mp4">
+      Your browser does not support the video tag.
+    </video>
+    <div class="caption">Forest Cats Video</div>
+  </div>
+</body>
+</html>
