@@ -4,6 +4,9 @@ __pycache__/
 *$py.class
 /.vscode
 
+# large files
+/datasets/VOCdevkit
+
 # C extensions
 *.so
 

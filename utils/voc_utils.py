@@ -60,3 +60,26 @@ def parse_target_voc(img_shape, target):
     labels = torch.tensor(labels, dtype = torch.float16)
     
     return {'bboxes': bboxes, 'labels': labels}
+
+def custom_collate_fn(batch):
+    """
+    Expects each item in the batch to be a tuple: (image, bboxes, labels).
+    - image: a tensor [C, H, W]
+    - bboxes: a tensor [num_boxes, 4] (num_boxes can vary between images)
+    - labels: a tensor [num_boxes]
+    
+    Returns:
+        images: a tensor of shape [B, C, H, W] (stacked)
+        bboxes: a list of length B, each element is a tensor of shape [num_boxes, 4]
+        labels: a list of length B, each element is a tensor of shape [num_boxes]
+    """
+    images = []
+    bboxes = []
+    labels = []
+    for item in batch:
+        image, bbox, label = item
+        images.append(image)
+        bboxes.append(bbox)
+        labels.append(label)
+    images = torch.stack(images, dim=0)
+    return images, bboxes, labels
