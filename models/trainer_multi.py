@@ -55,7 +55,6 @@ class TrainerMulti:
             images = images.to(self.device) # (B, 3, H, W)
             gt_boxes = [bbox.to(self.device) for bbox in bboxes]
             gt_labels = [label.to(self.device) for label in labels]
-            # TODO labels to onehot?
             
             # forward pass
             pred_boxes, pred_labels_logits, pred_obj_logits = self.model(images)
@@ -63,7 +62,7 @@ class TrainerMulti:
             # match boxes to gt
             obj_targets, bbox_targets, cls_targets = self.assign_targets(pred_boxes, gt_boxes, gt_labels, grid_size=7)
             
-            # mask according to matches
+            # mask according to Gt matches
             obj_mask = (obj_targets.squeeze(-1) == 1)
             
             # Compute bounding box loss only for the selected grid cells
@@ -71,7 +70,7 @@ class TrainerMulti:
                 # compute bbox loss for the matches
                 bbox_loss = self.bbox_loss_fn(pred_boxes[obj_mask], bbox_targets[obj_mask])
                 # compute class loss for the matches
-                class_loss = self.class_loss_fn(pred_labels_logits[obj_mask], cls_targets[obj_mask])
+                class_loss = self.class_loss_fn(pred_labels_logits[obj_mask].view(-1, self.num_classes), cls_targets[obj_mask].view(-1).long())
             else:
                 bbox_loss = torch.tensor(0.0, device=self.device)
                 class_loss = torch.tensor(0.0, device=self.device)
@@ -300,7 +299,7 @@ class TrainerMulti:
                 labels = labels.to(self.device)
                 
                 # run model inference and convert to probabilities
-                pred_bboxes, pred_labels, _ = self.model.inference(img, obj_threshold=0.5, nms_threshold=0.5)
+                pred_bboxes, pred_labels, _ = self.model.inference(img, obj_threshold=0.5, nms_threshold=0.4)
                 
                 # un-normalize image
                 mean, std = self.model.backbone_transforms().mean, self.model.backbone_transforms().std
