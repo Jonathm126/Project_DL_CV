@@ -7,8 +7,8 @@ config_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(config_dir)
 
 # # Now create dataset_path relative to project root
-# dataset_path = os.path.join(project_root, "datasets")
-dataset_path = 'C:\\Users\\jonathan\\.pytorch-datasets'
+dataset_path = os.path.join(project_root, "datasets")
+#dataset_path = 'C:\\Users\\jonathan\\.pytorch-datasets'
 
 config = {
     "dataset_path": dataset_path
