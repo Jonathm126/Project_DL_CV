@@ -1,100 +1,126 @@
-# import torch
+# voc_subset.py
+
+import torch
 from torchvision.datasets import VOCDetection
 from torchvision.ops import box_area, box_convert
 from torchvision.tv_tensors import BoundingBoxes
-import torch
 
-# my imports
+# CHANGED: We now import the shared dataset_path from config.py 
 from datasets.config import dataset_path
 import utils.voc_utils as voc_utils
 
-# define a class that is the subset of the VOC dataset, with the selected class
 class VOCSubset(VOCDetection):
-    def __init__(self, indices_list, selected_class, transforms = None, single_instance = True, download = False):
-        ''' Inputs:
-                - indices_list: list of indices, some of which have the "selected class"
-                - selected_class: name of selected class in VOC dataset. if none, returns all classes
-                - single_instance: bool, single object in frame (if no, multiple bboxes per frame returned)
-                - transforms: a transformation function for BOTH the image and the target
-        '''
-        # init the dataset
-        super().__init__(root=dataset_path,
-                        year="2012",
-                        image_set='trainval',
-                        download = download,
-                        transform = None,
-                        transforms = None)
+    """
+    A subset of the VOC dataset that only uses specified indices and optionally 
+    filters for a single selected class (single_instance or multi-instance).
+    """
+    def __init__(self, indices_list, selected_class, transforms=None, 
+                 single_instance=True, download=False):
+        """
+        Args:
+            indices_list (list[int]): subset of indices. 
+            selected_class (str or int): name of the selected class in VOC, or a numeric label index.
+            transforms (callable): a transform function that takes in (PIL Image, target_dict).
+            single_instance (bool): whether to keep only one largest bounding box per image.
+            download (bool): Whether to download VOC dataset if not found locally.
+        """
+        # CHANGED: Use dataset_path from config.py 
+        super().__init__(
+            root=dataset_path,
+            year="2012",
+            image_set="trainval",
+            download=download,
+            transform=None,   # Let both_transform handle everything instead
+            transforms=None
+        )
         
-        # store params
-        assert(len(indices_list) >= 1)
+        assert len(indices_list) >= 1, "indices_list must not be empty"
         self.selected_indices = indices_list
         self.single_instance = single_instance
         self.both_transform = transforms
         
-        # store the selected label as a number after conversion
+        # Convert the selected_class from string to label index (if needed)
         if isinstance(selected_class, str):
-            # If the selected_class is a string, map it to the corresponding label index
+            # For example, if selected_class = 'cat'
             self.selected_label = voc_utils.voc_class_to_idx[selected_class]
         else:
-            # assuming the alternative is an int or a tensor...
+            # If it's already an int, or you are passing a numeric label, just store as is
             self.selected_label = selected_class
 
     def __len__(self):
         return len(self.selected_indices)
 
     def __getitem__(self, idx):
-        '''returns image, bbox, label'''
-        # get the real image index from the selected indices
+        """
+        Returns:
+            (image_transformed, bboxes_xywh, labels)
+            - image_transformed: the (optionally) transformed image (Tensor)
+            - bboxes_xywh: bounding boxes in xywh (normalized to [0,1])
+            - labels: typically [1] if selected_class present, else [0]
+        """
+        # Map from local index in the subset to the original VOC index
         image_idx = self.selected_indices[idx]
         
-        # fetch the image using the saved index
+        # Use the parent class to load the image + annotation
         image, target = super().__getitem__(image_idx)
         
-        # convert the object to torch notation
+        # Convert the VOC-style annotation => a PyTorch-friendly dict with 'bboxes', 'labels', etc.
+        # This depends on your voc_utils implementation
         torch_target = voc_utils.parse_target_voc(image.size[0:2], target)
         
-        # call the transform
+        # Apply the user-supplied transform, if any. 
+        # Typically "self.both_transform" is a function that expects (PIL.Image, dict).
         image_transformed, transformed_target_dict = self.both_transform(image, torch_target)
         
-        # normalize bbox to (0,1) according to canvas size
-        canvas_size = torch.tensor(transformed_target_dict['bboxes'].canvas_size)
+        # The new bounding boxes are stored in transformed_target_dict['bboxes'] (a TVTensor).
+        # We'll normalize them to [0,1] by dividing by the canvas size
+        canvas_size = torch.tensor(transformed_target_dict['bboxes'].canvas_size)  # (H, W)
         bboxes_norm = transformed_target_dict['bboxes'] / torch.cat((canvas_size, canvas_size), dim=0)
         
-        # filter the result according to the single class \ single instance option
-        bboxes_clean, labels_clean = self.single_instance_and_filter(bboxes_norm, transformed_target_dict['labels'])
+        # Filter to keep only selected_class, etc.
+        bboxes_clean, labels_clean = self.single_instance_and_filter(
+            bboxes_norm,
+            transformed_target_dict['labels']
+        )
         
-        # transform to xywh, wrap again in Tvtensor boundingbox and in tensor
+        # Convert from xyxy => xywh
         bboxes_clean_xywh = box_convert(bboxes_clean, 'xyxy', 'xywh')
-        bboxes_clean_xywh = BoundingBoxes(bboxes_clean_xywh, format='xywh', canvas_size = canvas_size, dtype = torch.float32)
+        
+        # Wrap it back in a TVTensor if you like, for convenience
+        bboxes_clean_xywh = BoundingBoxes(
+            bboxes_clean_xywh, 
+            format='xywh', 
+            canvas_size=canvas_size, 
+            dtype=torch.float32
+        )
         
         return image_transformed, bboxes_clean_xywh, labels_clean
     
     def single_instance_and_filter(self, bboxes, labels):
-        '''filters annotations per frame based on the following rules:
-        - If `self.selected_label` and we are in selected label mode, exists in the image, set labels to 1.
-        - If `self.selected_label` and we are in selected label mode, does not exist, set all labels to 0.
-        - If `self.single_instance` is True, return only the largest bbox.
-        '''
-        # if single object per image:
+        """
+        Filters annotations in the following way:
+         - if self.selected_label is not None, keep only those bounding boxes matching selected_label 
+           (set label to 1). If none match, label = 0.
+         - if self.single_instance=True, pick only the bounding box with the largest area.
+        Returns:
+            (filtered_bboxes, filtered_labels)
+        """
+        # If we have a specific class to keep
         if self.selected_label is not None:
-            # filter for objects matching the selected label
-            mask = (labels == self.selected_label) 
+            mask = (labels == self.selected_label)
             if mask.sum() > 0:
-                # If selected object is in the frame, keep only those objects
+                # The selected object is in the frame => keep those objects, set label = 1
                 bboxes = bboxes[mask]
                 labels = torch.ones_like(labels[mask], dtype=torch.float16)
             else:
-                # If the selected object is NOT in the frame
-                labels = torch.zeros_like(labels, dtype = torch.float16)  # Set all labels to 0
-                # bboxes = torch.tensor([[0, 0, 0.001, 0.001]]).repeat(len(labels), 1) # set bboxes to xyxy = 0,0,.01,.01
+                # The selected class isn't in the frame => label = 0, (or you could keep an empty box)
+                labels = torch.zeros_like(labels, dtype=torch.float16)
+                # Potentially you could also zero out bboxes, but typically returning an empty box
         
-        # if single instance per image:
-        if self.single_instance:
-            # compute the boxes area
+        # If single instance, keep largest bounding box only
+        if self.single_instance and len(bboxes) > 0:
             areas = box_area(bboxes)
-            # get the index of the box with largest area
             largest_idx = areas.argmax().item()
-            # return the largest box and label
             bboxes = bboxes[largest_idx:largest_idx + 1]
             labels = labels[largest_idx:largest_idx + 1]
         
