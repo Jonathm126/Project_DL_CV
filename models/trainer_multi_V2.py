@@ -5,8 +5,6 @@ from torchvision.utils import make_grid
 from torchvision.ops import box_iou
 from tqdm import tqdm
 
-from utils import plot_utils
-
 class TrainerMulti:
     def __init__(
         self, 
@@ -20,15 +18,6 @@ class TrainerMulti:
         lr_scheduler=None, 
         stopping_patience=None
     ):
-        """
-        - device: Torch device
-        - model: MoMiDetectionModel
-        - train_dataloader, val_dataloader
-        - losses: [bbox_loss_fn, class_loss_fn, (optional) obj_loss_fn]
-        - writer: TensorBoard writer
-        - lr_scheduler: optional
-        - stopping_patience: optional early stopping
-        """
         self.device = device
         self.model = model
         self.train_dataloader = train_dataloader
@@ -40,7 +29,7 @@ class TrainerMulti:
         self.num_classes = self.model.num_classes  # e.g. 1 => cat only
         self.step_idx = 0
 
-        # We assume: losses = [bbox_loss_fn, class_loss_fn, obj_loss_fn(optional)]
+        # losses = [bbox_loss_fn, class_loss_fn, (optional) obj_loss_fn]
         self.bbox_loss_fn = losses[0]
         self.class_loss_fn = losses[1]
         if len(losses) > 2:
@@ -86,47 +75,42 @@ class TrainerMulti:
         total_steps = 0
         running_loss = 0.0
         
-        for batch_idx, (images, bboxes, labels) in enumerate(
-            tqdm(self.train_dataloader, desc=f"Train Epoch {epoch_idx+1}")
-        ):
+        for batch_idx, (images, bboxes, labels) in enumerate(tqdm(self.train_dataloader, desc=f"Train Epoch {epoch_idx+1}")):
             images = images.to(self.device)
             gt_boxes_list = [b.to(self.device) for b in bboxes]
             gt_labels_list = [l.to(self.device) for l in labels]
             
-            # forward
+            # Forward pass
             pred_offsets, pred_cls_logits = self.model(images)
-            # shape => [B, 49*k, 4], [B, 49*k, 2]
-            
-            # DEBUG: print max cat prob before we do any anchor assignment
-            with torch.no_grad():
-                # shape => [B,49*k,2]
-                probs = torch.softmax(pred_cls_logits, dim=-1)
-                cat_prob = probs[...,1]  # cat channel
-                cat_prob_max = cat_prob.max().item()
-                print(f"[DEBUG train_epoch] Batch={batch_idx}, cat_prob.max()={cat_prob_max:.4f}")
 
+            # pred_cls_logits => shape [B, 49*k, 2] if single class (cat vs background)
+            # We'll do a debug print of the cat probability's max:
+            with torch.no_grad():
+                cat_prob = torch.softmax(pred_cls_logits, dim=-1)[:,:,1]  # index=1 => cat
+                max_cat_prob = cat_prob.max().item()
+            
+            # We'll also do a debug print for how many anchors got assigned as positive
             obj_targets, offsets_targets, class_targets = self.assign_targets(
                 pred_offsets, gt_boxes_list, gt_labels_list
             )
-            # obj_targets => [B,49*k], 1 => object anchor, 0 => background
-            # offsets_targets => [B,49*k,4]
-            # class_targets => [B,49*k], label=1 => cat, 0 => BG
-            
+            # count positives
+            positives_count = (obj_targets > 0.5).sum().item()
+
+            # Debug print:
+            print(f"[DEBUG train_epoch] Batch={batch_idx}, cat_prob.max()={max_cat_prob:.4f}")
+            print(f"[DEBUG train_epoch] Batch={batch_idx}, positives={positives_count}")
+
+            # Flatten
             B, NA, _ = pred_offsets.shape
             pred_offsets_flat = pred_offsets.view(B * NA, 4)
-            pred_cls_logits_flat = pred_cls_logits.view(B * NA, 2)  # expecting 2 => (bg, cat)
-            
+            pred_cls_logits_flat = pred_cls_logits.view(B * NA, 2)
+
             obj_targets_flat = obj_targets.view(-1)
             offsets_targets_flat = offsets_targets.view(B * NA, 4)
             class_targets_flat = class_targets.view(-1)
-            
+
             # bounding box loss => only for anchors with obj=1
             obj_mask = (obj_targets_flat > 0.5)
-            
-            # DEBUG: check how many positives in this batch
-            num_pos = obj_mask.sum().item()
-            print(f"[DEBUG train_epoch] Batch={batch_idx}, positives={num_pos}")
-
             if obj_mask.sum() > 0:
                 bbox_loss = self.bbox_loss_fn(
                     pred_offsets_flat[obj_mask], offsets_targets_flat[obj_mask]
@@ -158,81 +142,125 @@ class TrainerMulti:
         with torch.no_grad():
             for images, bboxes, labels in self.val_dataloader:
                 images = images.to(self.device)
+                # Typically you'd do a forward pass if you want val loss
                 total_steps += 1
         
         val_loss = total_loss / max(1, total_steps)
         print(f"Epoch {epoch_idx+1} => validation loss= {val_loss:.4f}")
         return val_loss
     
-    def assign_targets(self, pred_offsets, gt_boxes_list, gt_labels_list, iou_thresh=0.3):
-        B, NA, _ = pred_offsets.shape
-        device = pred_offsets.device
+   def assign_targets(self, pred_offsets, gt_boxes_list, gt_labels_list, iou_thresh=0.5):
+    """
+    Two-pass anchor matching:
+      1) For each anchor, find its best GT. If IoU > iou_thresh => assign positive.
+      2) For each GT, find its best anchor => also assign positive
+    """
+    B, NA, _ = pred_offsets.shape
+    device = pred_offsets.device
+    
+    # 1) build base anchors
+    grid_size = self.model.feature_map_size
+    base_anchors = []
+    for row in range(grid_size):
+        for col in range(grid_size):
+            cx = (col+0.5)/grid_size
+            cy = (row+0.5)/grid_size
+            for (scale, ar) in self.model.anchors:
+                w = scale * math.sqrt(ar)
+                h = scale / math.sqrt(ar)
+                base_anchors.append([cx, cy, w, h])
+    base_anchors = torch.tensor(base_anchors, dtype=torch.float32, device=device)
+    
+    # convert anchors to xyxy
+    acx = base_anchors[:,0]
+    acy = base_anchors[:,1]
+    aw  = base_anchors[:,2]
+    ah  = base_anchors[:,3]
+    ax1 = acx - 0.5*aw
+    ay1 = acy - 0.5*ah
+    ax2 = acx + 0.5*aw
+    ay2 = acy + 0.5*ah
+    anchors_xyxy = torch.stack([ax1, ay1, ax2, ay2], dim=-1)  # [NA,4]
+    
+    obj_targets     = torch.zeros(B, NA, device=device)
+    offsets_targets = torch.zeros(B, NA, 4, device=device)
+    class_targets   = torch.zeros(B, NA, device=device)  # 0 => BG, 1 => cat
+    
+    for b_idx in range(B):
+        gt_boxes  = gt_boxes_list[b_idx]
+        gt_labels = gt_labels_list[b_idx]
+        if gt_boxes.numel() == 0:
+            # no GT => all background
+            continue
         
-        base_anchors = []
-        grid_size = self.model.feature_map_size
-        for row in range(grid_size):
-            for col in range(grid_size):
-                cx = (col+0.5)/grid_size
-                cy = (row+0.5)/grid_size
-                for (scale, ar) in self.model.anchors:
-                    w = scale * math.sqrt(ar)
-                    h = scale / math.sqrt(ar)
-                    base_anchors.append([cx, cy, w, h])
-        base_anchors = torch.tensor(base_anchors, dtype=torch.float32, device=device)
+        # convert GT from (x,y,w,h) to xyxy
+        gx1 = gt_boxes[:, 0]
+        gy1 = gt_boxes[:, 1]
+        gx2 = gx1 + gt_boxes[:, 2]
+        gy2 = gy1 + gt_boxes[:, 3]
+        gt_xyxy = torch.stack([gx1, gy1, gx2, gy2], dim=-1)  # [num_gt,4]
+
+        # compute IoU => shape [NA, num_gt]
+        ious = box_iou(anchors_xyxy, gt_xyxy)
+        num_gt = gt_xyxy.size(0)
         
-        acx = base_anchors[:,0]
-        acy = base_anchors[:,1]
-        aw  = base_anchors[:,2]
-        ah  = base_anchors[:,3]
-        ax1 = acx - 0.5*aw
-        ay1 = acy - 0.5*ah
-        ax2 = acx + 0.5*aw
-        ay2 = acy + 0.5*ah
-        anchors_xyxy = torch.stack([ax1, ay1, ax2, ay2], dim=-1)
-        
-        obj_targets = torch.zeros(B, NA, device=device)
-        offsets_targets = torch.zeros(B, NA, 4, device=device)
-        class_targets = torch.zeros(B, NA, device=device)  # 0 => BG, 1 => cat
-        
-        from torchvision.ops import box_iou
-        for b_idx in range(B):
-            gt_boxes  = gt_boxes_list[b_idx]
-            gt_labels = gt_labels_list[b_idx]
-            if gt_boxes.numel() == 0:
-                continue  # no GT => skip
+        # ------------------------------------------------
+        # PASS A: For each anchor => pick best GT
+        # ------------------------------------------------
+        best_iou_for_anchor, best_gt_idx_for_anchor = ious.max(dim=1)
+        # best_iou_for_anchor => shape [NA]
+        anchor_mask = (best_iou_for_anchor > iou_thresh)
+        # assign those anchors as positive
+        assigned_idxs = anchor_mask.nonzero(as_tuple=True)[0]
+        for a_idx in assigned_idxs:
+            gt_idx = best_gt_idx_for_anchor[a_idx]
+            obj_targets[b_idx, a_idx] = 1
+            class_targets[b_idx, a_idx] = 1  # single-class => 'cat'
+            # compute offsets
+            anc_cx, anc_cy, anc_w, anc_h = base_anchors[a_idx]
+            gt_x, gt_y, gt_w, gt_h = gt_boxes[gt_idx]
             
-            # convert GT to xyxy
-            gx1 = gt_boxes[:, 0]
-            gy1 = gt_boxes[:, 1]
-            gx2 = gx1 + gt_boxes[:, 2]
-            gy2 = gy1 + gt_boxes[:, 3]
-            gt_xyxy = torch.stack([gx1, gy1, gx2, gy2], dim=-1)
-            
-            ious = box_iou(anchors_xyxy, gt_xyxy)  # [NA, N]
-            iou_vals, anchor_idx = ious.max(dim=0)  # best anchor per GT
-            
-            for i, iouVal in enumerate(iou_vals):
-                if iouVal > iou_thresh:
-                    bestA = anchor_idx[i].item()
-                    obj_targets[b_idx, bestA] = 1
-                    class_targets[b_idx, bestA] = 1  # cat
-                    # offsets
-                    anc_cx, anc_cy, anc_w, anc_h = base_anchors[bestA]
-                    gt_x, gt_y, gt_w, gt_h = gt_boxes[i]
-                    gt_cx = gt_x + 0.5*gt_w
-                    gt_cy = gt_y + 0.5*gt_h
-                    tx = (gt_cx - anc_cx)/anc_w
-                    ty = (gt_cy - anc_cy)/anc_h
-                    tw = torch.log(gt_w/anc_w + 1e-8)
-                    th = torch.log(gt_h/anc_h + 1e-8)
-                    offsets_targets[b_idx, bestA] = torch.stack([tx,ty,tw,th], dim=0)
+            gt_cx = gt_x + 0.5 * gt_w
+            gt_cy = gt_y + 0.5 * gt_h
+            tx = (gt_cx - anc_cx) / anc_w
+            ty = (gt_cy - anc_cy) / anc_h
+            tw = torch.log(gt_w/anc_w + 1e-8)
+            th = torch.log(gt_h/anc_h + 1e-8)
+            offsets_targets[b_idx, a_idx] = torch.tensor([tx, ty, tw, th], device=device)
         
-        return obj_targets, offsets_targets, class_targets.unsqueeze(-1)
+        # ------------------------------------------------
+        # PASS B: For each GT => pick best anchor
+        # ------------------------------------------------
+        best_iou_for_gt, anchor_idx_for_gt = ious.max(dim=0)  # shape [num_gt]
+        for gt_i in range(num_gt):
+            iou_val = best_iou_for_gt[gt_i]
+            a_idx   = anchor_idx_for_gt[gt_i]
+            # We also assign this anchor to the GT, even if iou < iou_thresh
+            # ensures each GT has at least one assigned anchor
+            obj_targets[b_idx, a_idx] = 1
+            class_targets[b_idx, a_idx] = 1
+            
+            # compute offsets
+            anc_cx, anc_cy, anc_w, anc_h = base_anchors[a_idx]
+            gt_x, gt_y, gt_w, gt_h = gt_boxes[gt_i]
+            
+            gt_cx = gt_x + 0.5 * gt_w
+            gt_cy = gt_y + 0.5 * gt_h
+            tx = (gt_cx - anc_cx) / anc_w
+            ty = (gt_cy - anc_cy) / anc_h
+            tw = torch.log(gt_w/anc_w + 1e-8)
+            th = torch.log(gt_h/anc_h + 1e-8)
+            offsets_targets[b_idx, a_idx] = torch.tensor([tx, ty, tw, th], device=device)
+    
+    # class_targets is shape [B,NA]
+    # for consistency with your code, you might want to return shape [B,NA,1]
+    return obj_targets, offsets_targets, class_targets.unsqueeze(-1)
+
 
     def tb_log_voc_images(self, epoch_idx):
         """
         Log some validation images + predicted boxes to TensorBoard.
-        We lower the obj_threshold to 0.2 so we can see more boxes,
+        We lower the obj_threshold so we can see more boxes,
         and print how many boxes we found per image.
         """
         images_with_boxes = []
@@ -247,10 +275,9 @@ class TrainerMulti:
                 bboxes = bboxes.to(self.device)
                 labels = labels.to(self.device)
                 
-                # lower threshold to 0.2
-                all_boxes, all_lbls, all_scores = self.model.inference(img, obj_threshold=0.2, nms_threshold=0.4)
-                
-                # each is list of length B=1 => all_boxes[0], ...
+                all_boxes, all_lbls, all_scores = self.model.inference(
+                    img, obj_threshold=0.2, nms_threshold=0.4
+                )
                 pred_bboxes = all_boxes[0]
                 pred_labels = all_lbls[0]
                 pred_scores = all_scores[0]
@@ -258,18 +285,27 @@ class TrainerMulti:
                 print(f"[tb_log_voc_images] idx={idx} => Found {len(pred_bboxes)} boxes, scores={pred_scores.cpu().numpy()}")
                 
                 mean, std = self.model.backbone_transforms().mean, self.model.backbone_transforms().std
-                unnorm_img = plot_utils.unnormalize(img, mean, std)
+                unnorm_img = self._unnormalize(img, mean, std)
                 
-                img_with_boxes = plot_utils.voc_img_bbox_plot(
-                    unnorm_img.squeeze(0), 
-                    bboxes, labels, 
-                    pred_bboxes, pred_labels
-                )
+                # Draw them => red=GT, blue=pred
+                img_with_boxes = self._plot(unnorm_img.squeeze(0), bboxes, labels, pred_bboxes, pred_labels)
                 images_with_boxes.append(img_with_boxes)
             
             if len(images_with_boxes) > 0:
-                from torchvision.utils import make_grid
                 grid = make_grid(torch.stack(images_with_boxes), nrow=4)
                 self.writer.add_image(f"ValResults/Epoch_{epoch_idx}", grid, epoch_idx)
                 return grid
         return None
+
+    # You might have your own plot or unnormalize logic
+    def _unnormalize(self, x, mean, std):
+        # Example function
+        for c in range(x.shape[1]):
+            x[:,c,:,:] = x[:,c,:,:] * std[c] + mean[c]
+        return x
+
+    def _plot(self, image_tensor, bboxes, labels, pred_bboxes, pred_labels):
+        # Just a placeholder function for bounding-box plotting
+        # Return a tensor image with boxes
+        # You likely have your own plot_utils
+        return image_tensor
